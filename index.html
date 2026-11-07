@@ -522,10 +522,17 @@
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') persist(); });
 
   const playBtn=document.getElementById('playBtn');
-  function stopPlay(){ playing=false; playBtn.textContent='▶ 再生'; if(playTimer) clearInterval(playTimer); playTimer=null; loadFrame(cur); }
+  let playSession=0;
+  function stopPlay(){ playing=false; playSession++; playBtn.textContent='▶ 再生'; if(playTimer) clearInterval(playTimer); playTimer=null; loadFrame(cur); }
   playBtn.onclick=()=>{ if(playing){ stopPlay(); return; } if(frames.length<2){ alert('コマを2つ以上作ると再生できます'); return; }
-    saveCur(); playing=true; canvasSynced=false; playBtn.textContent='⏸ 停止'; octx.clearRect(0,0,W,H); let i=0;
-    const show=()=>{ const img=imgFor(frames[i]); const drawIt=()=>{ if(!playing) return; dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${i+1} / ${frames.length} コマ`; }; if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt; i=(i+1)%frames.length; };
+    saveCur(); playing=true; canvasSynced=false; const session=++playSession; playBtn.textContent='⏸ 停止'; octx.clearRect(0,0,W,H); let i=0;
+    const show=()=>{ const idx=i; const img=imgFor(frames[idx]); const drawIt=()=>{ if(!playing || session!==playSession) return; dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${idx+1} / ${frames.length} コマ`; }; if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt;
+      i++;
+      if(i>=frames.length){ // 一周したら止める（最後のコマを表示時間ぶん見せてから、編集していたコマに戻る）
+        if(playTimer) clearInterval(playTimer); playTimer=null;
+        setTimeout(()=>{ if(playing && session===playSession) stopPlay(); }, 1000/fps);
+      }
+    };
     show(); playTimer=setInterval(show, 1000/fps); };
   document.getElementById('fpsRange').oninput=e=>{ fps=+e.target.value; document.getElementById('fpsVal').textContent=fps; if(playing){ stopPlay(); playBtn.onclick(); } persist(); };
   document.getElementById('fpsRange').addEventListener('change', e=>{ const nf=+e.target.value; if(nf!==committedFps){ const s=captureState(); s.fps=committedFps; undoStack.push(s); if(undoStack.length>30) undoStack.shift(); redoStack=[]; committedFps=nf; } });
@@ -675,7 +682,7 @@
     const chunks=[]; rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
     const stopped=new Promise(r=>{ rec.onstop=r; });
     rec.start();
-    for(let loop=0; loop<2; loop++){ for(const src of frames){ const img=imgFor(src); await new Promise(r=>{ if(img.complete && img.naturalWidth) r(); else { img.onload=r; img.onerror=r; } }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
+    for(let loop=0; loop<1; loop++){ for(const src of frames){ const img=imgFor(src); await new Promise(r=>{ if(img.complete && img.naturalWidth) r(); else { img.onload=r; img.onerror=r; } }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
     rec.stop(); await stopped;
     return new Blob(chunks,{type:(rec.mimeType||'video/webm').split(';')[0]});
   }
@@ -699,7 +706,7 @@
     saveCur();
     const key=videoKey();
     if(videoCache.key===key && videoCache.blob) return {blob:videoCache.blob, fresh:false};
-    const estMs=frames.length*2*1000/Math.max(1,fps);
+    const estMs=frames.length*1000/Math.max(1,fps);
     showBusy(`動画を作成中…（約${Math.max(1,Math.round(estMs/1000))}秒）`, estMs);
     try{
       const blob=await makeWebmBlob();
