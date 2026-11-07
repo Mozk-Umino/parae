@@ -150,20 +150,11 @@
 <script>
 (() => {
   // ダブルタップ拡大の防止（iOS Safariは user-scalable=no と touch-action を無視することがあるためJSでも止める）
-  // 2回目のタップは拡大を止める代わりにボタンの click を手動で発火させるので、戻す／コピーの連打はそのまま効く
+  // 以前は2回目タップで click を手動発火させていたが、ブラウザ本来の click と二重に走って
+  // コピーが2回・戻すが2段・削除確認が2回といった誤動作の原因になったため、手動発火は撤去した。
+  // 拡大防止は CSS の touch-action: manipulation と下記の preventDefault で行う
   document.addEventListener('dblclick', e => { e.preventDefault(); }, {passive:false});
   document.addEventListener('gesturestart', e => { e.preventDefault(); }, {passive:false});
-  let lastTouchEnd = 0, reDispatching = false;
-  document.addEventListener('touchend', e => {
-    const now = Date.now();
-    const target = e.target && e.target.closest ? e.target.closest('button, .thumb, label') : null;
-    if (!reDispatching && target && now - lastTouchEnd <= 350) {
-      e.preventDefault();
-      reDispatching = true;
-      try { target.click(); } finally { reDispatching = false; }
-    }
-    lastTouchEnd = now;
-  }, {passive:false});
   const W=512,H=384;
   const draw=document.getElementById('drawCanvas'), dctx=draw.getContext('2d',{willReadFrequently:true});
   const onion=document.getElementById('onionCanvas'), octx=onion.getContext('2d');
@@ -173,13 +164,22 @@
 
   function blankURL(){ const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);return c.toDataURL('image/png'); }
   function snapshot(){ const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);x.drawImage(draw,0,0);return c.toDataURL('image/png'); }
-  function saveCur(){ if(frames.length) frames[cur]=snapshot(); }
+  // 画像のデコード済みキャッシュ（同じ dataURL はブラウザが再利用するので読み込みが即時に近くなる）
+  const imageCache=new Map();
+  function imgFor(url){ let im=imageCache.get(url); if(!im){ im=new Image(); im.src=url; imageCache.set(url,im); } return im; }
+  // canvasSynced: キャンバスの見た目が「今のコマの保存内容」と一致しているか。
+  // コマ切替の読み込み中や再生中は一致しない。この間 saveCur() でキャンバスを上書き保存すると
+  // 別のコマの絵が今のコマにコピーされてしまうため、一致していない間は保存しない
+  let canvasSynced=false, loadToken=0;
+  function saveCur(){ if(frames.length && canvasSynced) frames[cur]=snapshot(); }
   function loadFrame(i){
     resetZoom();
     cur=Math.max(0,Math.min(i,frames.length-1));
-    const img=new Image();
-    img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H); updateOnion(); renderTimeline(); };
-    img.src=frames[cur];
+    const token=++loadToken;
+    const url=frames[cur]; const img=imgFor(url);
+    const drawIt=()=>{ if(token!==loadToken) return; dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H); canvasSynced=true; updateOnion(); renderTimeline(); };
+    if(img.complete && img.naturalWidth){ drawIt(); }
+    else { canvasSynced=false; img.onload=drawIt; }
   }
   // --- 作品全体の履歴（描画・コマ操作・FPSをまとめて戻す／進める） ---
   let committedFps=8;
@@ -193,7 +193,9 @@
   function updateOnion(){
     octx.clearRect(0,0,W,H);
     if(!document.getElementById('onionToggle').checked || cur===0 || playing) return;
-    const img=new Image(); img.onload=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); }; img.src=frames[cur-1];
+    const img=imgFor(frames[cur-1]);
+    const drawIt=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); };
+    if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt;
   }
   let suppressThumbClickUntil=0, thumbDrag=null;
   let multiDelMode=false; const multiSel=new Set();
@@ -323,7 +325,9 @@
     if(!drawing) return;
     drawing=false;
     undoStack.pop(); // ピンチ開始で中断した描画は履歴に残さない。キャンバスは保存済みの現在コマに戻す
-    const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); }; img.src=frames[cur];
+    const img=imgFor(frames[cur]);
+    const drawIt=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); };
+    if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt;
   }
   function start(e){
     if(playing) return;
@@ -337,7 +341,11 @@
       e.preventDefault(); return;
     }
     if(pointers.size>2){ e.preventDefault(); return; }
-    e.preventDefault(); const p=pos(e); pushUndo();
+    e.preventDefault(); const p=pos(e);
+    if(!canvasSynced){ // コマ切替の読み込み完了前に描き始めたら、読み込みを打ち切って見えている絵を今のコマとして引き取る
+      loadToken++; canvasSynced=true; frames[cur]=snapshot();
+    }
+    pushUndo();
     if(tool==='fill'){ floodFill(p.x,p.y,color); persist(); renderTimeline(); return; }
     if(tool==='move'){ drawing=true; last=p; moveDrag={ox:p.x, oy:p.y, src:document.createElement('canvas')}; moveDrag.src.width=W; moveDrag.src.height=H; moveDrag.src.getContext('2d').drawImage(draw,0,0); return; }
     drawing=true; last=p; drawDot(p);
@@ -471,8 +479,8 @@
   const playBtn=document.getElementById('playBtn');
   function stopPlay(){ playing=false; playBtn.textContent='▶ 再生'; if(playTimer) clearInterval(playTimer); playTimer=null; loadFrame(cur); }
   playBtn.onclick=()=>{ if(playing){ stopPlay(); return; } if(frames.length<2){ alert('コマを2つ以上作ると再生できます'); return; }
-    saveCur(); playing=true; playBtn.textContent='⏸ 停止'; octx.clearRect(0,0,W,H); let i=0;
-    const show=()=>{ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${i+1} / ${frames.length} コマ`; }; img.src=frames[i]; i=(i+1)%frames.length; };
+    saveCur(); playing=true; canvasSynced=false; playBtn.textContent='⏸ 停止'; octx.clearRect(0,0,W,H); let i=0;
+    const show=()=>{ const img=imgFor(frames[i]); const drawIt=()=>{ if(!playing) return; dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${i+1} / ${frames.length} コマ`; }; if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt; i=(i+1)%frames.length; };
     show(); playTimer=setInterval(show, 1000/fps); };
   document.getElementById('fpsRange').oninput=e=>{ fps=+e.target.value; document.getElementById('fpsVal').textContent=fps; if(playing){ stopPlay(); playBtn.onclick(); } persist(); };
   document.getElementById('fpsRange').addEventListener('change', e=>{ const nf=+e.target.value; if(nf!==committedFps){ const s=captureState(); s.fps=committedFps; undoStack.push(s); if(undoStack.length>30) undoStack.shift(); redoStack=[]; committedFps=nf; } });
