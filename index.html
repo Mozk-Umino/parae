@@ -107,27 +107,32 @@
   </div>
 
   <div class="panel row">
-    <span class="label">保存・書き出し（保存はこの端末のブラウザ内です）</span>
+    <span class="label">ぱらえファイル（編集できる形で保存）</span>
+    <button id="newBtn">新規</button>
     <button id="saveBtn">💾 保存</button>
-    <button id="pngBtn">画像で保存</button>
-    <button id="webmBtn">🎬 動画(WebM)で保存</button>
-    <button id="shareBtn" class="primary">📤 共有する</button>
-    <button id="sharePngBtn">📤 今のコマを画像で共有</button>
-    <button id="newBtn">新規作成</button>
-  </div>
-
-  <div class="panel row">
-    <span class="label">作品（複数保存できます。開くと今の作品と入れ替わります）</span>
-    <button id="workSaveAsBtn">📚 名前をつけて保存</button>
+    <button id="workSaveAsBtn">名前をつけて保存</button>
     <select id="workList" style="font-size:14px;padding:8px;max-width:60vw"><option value="">保存した作品…</option></select>
     <button id="workOpenBtn">開く</button>
     <button id="workDelBtn">削除</button>
-    <button id="workExportBtn">作品ファイルで保存</button>
-    <button id="workImportBtn">作品ファイルを開く</button>
+    <button id="workExportBtn">ファイルに保存</button>
+    <button id="workImportBtn">ファイルを開く</button>
     <input type="file" id="workFile" accept="application/json,.json" style="display:none">
   </div>
 
-  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には「作品ファイルで保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
+  <div class="panel row">
+    <span class="label">変換して保存</span>
+    <button id="stripBtn">画像で保存（全コマ）</button>
+    <button id="webmBtn">🎬 動画で保存</button>
+    <button id="pngBtn">今のコマを保存</button>
+  </div>
+
+  <div class="panel row">
+    <span class="label">共有</span>
+    <button id="shareBtn" class="primary">📤 動画を共有</button>
+    <button id="sharePngBtn">📤 今のコマを画像で共有</button>
+  </div>
+
+  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
 </div>
 <script>
 (() => {
@@ -456,6 +461,11 @@
   });
   refreshWorkList('');
   document.getElementById('pngBtn').onclick=()=>{ saveCur(); const a=document.createElement('a'); a.download='parae-frame.png'; a.href=frames[cur]; a.click(); };
+  document.getElementById('stripBtn').onclick=async ()=>{ saveCur();
+    const c=document.createElement('canvas'); c.width=W*frames.length; c.height=H; const x=c.getContext('2d');
+    x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+    for(let i=0;i<frames.length;i++){ const img=new Image(); await new Promise(r=>{ img.onload=r; img.onerror=r; img.src=frames[i]; }); x.drawImage(img, i*W, 0); }
+    const a=document.createElement('a'); a.download='parae-strip.png'; a.href=c.toDataURL('image/png'); a.click(); };
   async function makeWebmBlob(){
     const c=document.createElement('canvas'); c.width=W;c.height=H; const x=c.getContext('2d');
     if(!c.captureStream || typeof MediaRecorder==='undefined') return null;
