@@ -135,7 +135,7 @@
 
   <div class="panel row">
     <span class="label">変換して保存</span>
-    <button id="stripBtn">画像で保存（全コマ）</button>
+    <button id="zipBtn">画像で保存（全コマZIP）</button>
     <button id="webmBtn">🎬 動画で保存</button>
     <button id="pngBtn">今のコマを保存</button>
     <span style="font-size:11px;color:#888;width:100%">画像・動画のファイルとして、ダウンロード先に保存されます。</span>
@@ -587,23 +587,52 @@
   });
   refreshWorkList();
   document.getElementById('pngBtn').onclick=()=>{ saveCur(); const a=document.createElement('a'); a.download='parae-frame.png'; a.href=frames[cur]; a.click(); };
-  document.getElementById('stripBtn').onclick=async ()=>{ saveCur();
-    const c=document.createElement('canvas'); c.width=W*frames.length; c.height=H; const x=c.getContext('2d');
-    x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
-    for(let i=0;i<frames.length;i++){ const img=new Image(); await new Promise(r=>{ img.onload=r; img.onerror=r; img.src=frames[i]; }); x.drawImage(img, i*W, 0); }
-    const a=document.createElement('a'); a.download='parae-strip.png'; a.href=c.toDataURL('image/png'); a.click(); };
+  // --- ZIP書き出し（無圧縮STORE形式。PNGは圧縮済みなのでこれで十分） ---
+  const crcTable=(()=>{ const t=[]; for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1? (0xEDB88320^(c>>>1)) : (c>>>1); t[n]=c>>>0; } return t; })();
+  function crc32(buf){ let c=0xFFFFFFFF; for(let i=0;i<buf.length;i++) c=crcTable[(c^buf[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+  function dataURLBytes(src){ const bin=atob(src.split(',')[1]); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u; }
+  function makeZipBlob(entries){
+    const enc=new TextEncoder(); const chunks=[]; const central=[]; let offset=0;
+    const push=a=>{ chunks.push(a); offset+=a.length; };
+    const u16=n=>new Uint8Array([n&255,(n>>>8)&255]);
+    const u32=n=>new Uint8Array([n&255,(n>>>8)&255,(n>>>16)&255,(n>>>24)&255]);
+    for(const e of entries){
+      const name=enc.encode(e.name), crc=crc32(e.data), localOffset=offset;
+      push(u32(0x04034b50)); push(u16(20)); push(u16(0x0800)); push(u16(0)); push(u16(0)); push(u16(0x21));
+      push(u32(crc)); push(u32(e.data.length)); push(u32(e.data.length)); push(u16(name.length)); push(u16(0));
+      push(name); push(e.data);
+      central.push({name, crc, size:e.data.length, localOffset});
+    }
+    const centralStart=offset;
+    for(const c of central){
+      push(u32(0x02014b50)); push(u16(20)); push(u16(20)); push(u16(0x0800)); push(u16(0)); push(u16(0)); push(u16(0x21));
+      push(u32(c.crc)); push(u32(c.size)); push(u32(c.size)); push(u16(c.name.length));
+      push(u16(0)); push(u16(0)); push(u16(0)); push(u16(0)); push(u32(0)); push(u32(c.localOffset)); push(c.name);
+    }
+    const centralSize=offset-centralStart;
+    push(u32(0x06054b50)); push(u16(0)); push(u16(0)); push(u16(central.length)); push(u16(central.length));
+    push(u32(centralSize)); push(u32(centralStart)); push(u16(0));
+    return new Blob(chunks,{type:'application/zip'});
+  }
+  document.getElementById('zipBtn').onclick=()=>{ saveCur();
+    const entries=frames.map((src,i)=>({ name:`frame-${String(i+1).padStart(3,'0')}.png`, data:dataURLBytes(src) }));
+    downloadBlob(makeZipBlob(entries), 'parae-frames.zip');
+  };
   async function makeWebmBlob(){
     const c=document.createElement('canvas'); c.width=W;c.height=H; const x=c.getContext('2d');
     if(!c.captureStream || typeof MediaRecorder==='undefined') return null;
     const stream=c.captureStream(fps);
-    let rec; try{ rec=new MediaRecorder(stream,{mimeType:'video/webm'}); }catch(e){ return null; }
+    // MP4で録れる環境（新しめのSafari等）ではMP4を優先する。WebMはiPhone標準アプリで再生できないことがあるため
+    let mime=''; if(typeof MediaRecorder!=='undefined' && MediaRecorder.isTypeSupported){ for(const cand of ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9','video/webm']){ if(MediaRecorder.isTypeSupported(cand)){ mime=cand; break; } } }
+    let rec; try{ rec=new MediaRecorder(stream, mime?{mimeType:mime}:undefined); }catch(e){ return null; }
     const chunks=[]; rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
     const stopped=new Promise(r=>{ rec.onstop=r; });
     rec.start();
     for(let loop=0; loop<2; loop++){ for(const src of frames){ const img=imgFor(src); await new Promise(r=>{ if(img.complete && img.naturalWidth) r(); else { img.onload=r; img.onerror=r; } }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
     rec.stop(); await stopped;
-    return new Blob(chunks,{type:'video/webm'});
+    return new Blob(chunks,{type:(rec.mimeType||'video/webm').split(';')[0]});
   }
+  function videoExt(blob){ return blob && blob.type.includes('mp4') ? 'mp4' : 'webm'; }
   // 動画は作るのに時間がかかる（実時間で録画するため）ので、作品が変わっていない間は作り直さない。
   // キャッシュの照合はコマ画像の中身から作るキーで行う（保存経路に依存しないため）
   let videoCache={key:null, blob:null};
@@ -622,7 +651,7 @@
   document.getElementById('webmBtn').onclick=async()=>{
     saveCur(); const {blob}=await getVideoBlob();
     if(!blob){ alert('このブラウザでは動画保存に未対応です。再生しながら画面録画するか、画像保存を使ってください'); return; }
-    downloadBlob(blob,'parae.webm');
+    downloadBlob(blob,`parae.${videoExt(blob)}`);
   };
   async function shareFile(file, fallbackBlob, fallbackName, wasFresh){
     // スマホの共有シート（ファイル付き）に対応していればそれを使い、なければダウンロードへ
@@ -650,8 +679,9 @@
       const {blob, fresh}=await getVideoBlob();
       if(!blob){ alert('このブラウザでは動画作成に未対応です。「今のコマを画像で共有」は使えます'); return; }
       if(!fresh) btn.textContent='共有を開いています…';
-      const file=new File([blob],'parae.webm',{type:'video/webm'});
-      await shareFile(file, blob, 'parae.webm', fresh);
+      const fname=`parae.${videoExt(blob)}`;
+      const file=new File([blob],fname,{type:blob.type});
+      await shareFile(file, blob, fname, fresh);
     } finally { btn.disabled=false; btn.textContent=old; }
   };
   document.getElementById('sharePngBtn').onclick=async()=>{
