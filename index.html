@@ -116,9 +116,7 @@
     <button id="newBtn">新規</button>
     <button id="saveBtn">💾 保存</button>
     <button id="workSaveAsBtn">名前をつけて保存</button>
-    <select id="workList" style="font-size:14px;padding:8px;max-width:60vw"><option value="">保存した作品…</option></select>
-    <button id="workOpenBtn">開く</button>
-    <button id="workDelBtn">削除</button>
+    <div id="worksList" style="width:100%;display:flex;flex-direction:column;gap:6px"></div>
     <span id="saveState" style="font-size:12px;color:#888;width:100%"></span>
     <span style="font-size:11px;color:#888;width:100%">注意：この端末の、このブラウザの中にだけ保存されます。ファイルにはなりません。他の端末や他のブラウザでは開けません。ブラウザのデータを消すと一緒に消えます。保存容量には上限があります（目安 約5MB）。</span>
   </div>
@@ -439,14 +437,53 @@
   const WORKS_KEY='parae-works-v1';
   function loadWorks(){ try{ const d=JSON.parse(localStorage.getItem(WORKS_KEY)||'[]'); return Array.isArray(d)?d:[]; }catch(e){ return []; } }
   function storeWorks(list){ localStorage.setItem(WORKS_KEY, JSON.stringify(list)); }
-  function refreshWorkList(selected){
-    const sel=document.getElementById('workList'); const curVal=selected!==undefined?selected:sel.value;
-    sel.innerHTML='<option value="">保存した作品…</option>';
-    loadWorks().forEach((w,i)=>{ const o=document.createElement('option'); o.value=String(i);
-      const dt=new Date(w.savedAt); const label=`${w.name}（${w.frames.length}コマ・${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}）`;
-      o.textContent=label; sel.appendChild(o); });
-    sel.value=curVal; if(sel.selectedIndex<0) sel.selectedIndex=0;
+  function refreshWorkList(){
+    const box=document.getElementById('worksList'); box.innerHTML='';
+    const works=loadWorks();
+    if(!works.length){ const d=document.createElement('div'); d.style.cssText='font-size:12px;color:#999'; d.textContent='保存した作品はまだありません'; box.appendChild(d); return; }
+    works.forEach((w,i)=>{
+      const dt=new Date(w.savedAt);
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px;background:#fff';
+      const img=document.createElement('img'); img.src=w.frames[0]||''; img.alt=''; img.style.cssText='width:52px;height:39px;object-fit:cover;border:1px solid var(--line);border-radius:6px;background:#fff';
+      const meta=document.createElement('div'); meta.style.cssText='flex:1;min-width:0';
+      const nm=document.createElement('div'); nm.style.cssText='font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'; nm.textContent=w.name;
+      const sub=document.createElement('div'); sub.style.cssText='font-size:11px;color:#888'; sub.textContent=`${w.frames.length}コマ・${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+      meta.appendChild(nm); meta.appendChild(sub);
+      row.appendChild(img); row.appendChild(meta);
+      [['開く','open'],['上書き','overwrite'],['名前変更','rename'],['削除','del']].forEach(([label,act])=>{
+        const b=document.createElement('button'); b.textContent=label; b.dataset.act=act; b.dataset.idx=String(i);
+        b.style.cssText='padding:7px 8px;min-height:38px;font-size:12px';
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    });
   }
+  document.getElementById('worksList').addEventListener('click', e=>{
+    const b=e.target.closest('button[data-act]'); if(!b) return;
+    const idx=+b.dataset.idx, act=b.dataset.act, works=loadWorks(), w=works[idx]; if(!w) return;
+    if(act==='open'){
+      if(!confirm(`「${w.name}」を開きますか？今の作品は置き換わります（残したい場合は先に保存してください）`)) return;
+      applyWorkData(w.frames, w.fps);
+    } else if(act==='overwrite'){
+      if(!confirm(`今の作品で「${w.name}」を上書きしますか？`)) return;
+      saveCur(); works[idx]={name:w.name, savedAt:Date.now(), frames:[...frames], fps};
+      try{ storeWorks(works); }catch(err){ alert('ブラウザの保存容量がいっぱいで上書きできませんでした。「ファイルに保存」を使ってください'); return; }
+      refreshWorkList(); alert(`「${w.name}」を上書き保存しました`);
+    } else if(act==='rename'){
+      const name=(prompt('新しい名前', w.name)||'').trim();
+      if(!name || name===w.name) return;
+      if(works.some((x,j)=>j!==idx && x.name===name)){ alert(`「${name}」という名前の作品が既にあります`); return; }
+      works[idx]={...w, name};
+      try{ storeWorks(works); }catch(err){ alert('保存できませんでした'); return; }
+      refreshWorkList();
+    } else if(act==='del'){
+      if(!confirm(`「${w.name}」を削除しますか？`)) return;
+      works.splice(idx,1);
+      try{ storeWorks(works); }catch(err){}
+      refreshWorkList();
+    }
+  });
   document.getElementById('workSaveAsBtn').onclick=()=>{
     saveCur();
     const works=loadWorks();
@@ -458,7 +495,7 @@
     if(idx>=0) works[idx]=entry; else works.push(entry);
     try{ storeWorks(works); }
     catch(e){ alert('ブラウザの保存容量がいっぱいで保存できませんでした。「作品ファイルで保存」を使ってください'); return; }
-    refreshWorkList(String(idx>=0?idx:works.length-1));
+    refreshWorkList();
     alert(`「${name}」を保存しました`);
   };
   function applyWorkData(newFrames, newFps){
@@ -467,20 +504,6 @@
     undoStack=[]; redoStack=[];
     persistRaw(); loadFrame(0);
   }
-  document.getElementById('workOpenBtn').onclick=()=>{
-    const sel=document.getElementById('workList'); if(sel.value===''){ alert('開く作品を選んでください'); return; }
-    const w=loadWorks()[+sel.value]; if(!w) return;
-    if(!confirm(`「${w.name}」を開きますか？今の作品は置き換わります（残したい場合は先に「名前をつけて保存」してください）`)) return;
-    applyWorkData(w.frames, w.fps);
-  };
-  document.getElementById('workDelBtn').onclick=()=>{
-    const sel=document.getElementById('workList'); if(sel.value===''){ alert('削除する作品を選んでください'); return; }
-    const works=loadWorks(); const w=works[+sel.value]; if(!w) return;
-    if(!confirm(`「${w.name}」を削除しますか？`)) return;
-    works.splice(+sel.value,1);
-    try{ storeWorks(works); }catch(e){}
-    refreshWorkList('');
-  };
   document.getElementById('workExportBtn').onclick=()=>{
     saveCur();
     const now=new Date(); const pad=n=>String(n).padStart(2,'0');
@@ -504,7 +527,7 @@
     reader.onerror=()=>alert('ファイルの読み込みに失敗しました');
     reader.readAsText(f);
   });
-  refreshWorkList('');
+  refreshWorkList();
   document.getElementById('pngBtn').onclick=()=>{ saveCur(); const a=document.createElement('a'); a.download='parae-frame.png'; a.href=frames[cur]; a.click(); };
   document.getElementById('stripBtn').onclick=async ()=>{ saveCur();
     const c=document.createElement('canvas'); c.width=W*frames.length; c.height=H; const x=c.getContext('2d');
