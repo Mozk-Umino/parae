@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ぱらえ - パラパラマンガが作れるお絵かきメモ</title>
+<meta name="description" content="スマホで描けるパラパラマンガ作成ツール。コマを描いて、つなげて、再生する。">
+<style>
+  :root{--accent:#ff7a1a;--bg:#fff8ec;--panel:#fff;--line:#e8ddd0;--text:#222}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Hiragino Sans",sans-serif;overscroll-behavior:none;touch-action:manipulation}
+  button,input,label,.thumb{touch-action:manipulation;user-select:none;-webkit-user-select:none}
+  header{padding:10px 14px 6px;display:flex;align-items:center;justify-content:space-between}
+  header h1{font-size:18px;margin:0} header .sub{font-size:11px;color:#888}
+  .wrap{max-width:560px;margin:0 auto;padding:0 10px calc(16px + env(safe-area-inset-bottom))}
+  .stage{position:relative;width:100%;aspect-ratio:4/3;background:#fff;border:2px solid var(--line);border-radius:12px;overflow:hidden;touch-action:none}
+  .stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;transform-origin:0 0}
+  #onionCanvas{opacity:.38}
+  #drawCanvas{touch-action:none}
+  .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
+  button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 10px;font-size:14px;min-height:44px;cursor:pointer}
+  button.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+  .color{width:36px;height:36px;border-radius:50%;padding:0;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .color.active{box-shadow:0 0 0 3px var(--accent)}
+  .label{font-size:11px;color:#888;width:100%}
+  #timeline{display:flex;gap:8px;overflow-x:auto;padding:6px 2px;-webkit-overflow-scrolling:touch}
+  .thumb{flex:0 0 auto;width:72px;text-align:center;position:relative;touch-action:pan-x}
+  .thumb.dragging{z-index:3;opacity:.95}
+  .thumb.dragging img{border-color:var(--accent);box-shadow:0 6px 16px rgba(0,0,0,.28)}
+  .thumb img{width:72px;height:54px;object-fit:cover;border:2px solid var(--line);border-radius:8px;background:#fff}
+  .thumb.active img{border-color:var(--accent)}
+  .thumb span{font-size:11px;color:#666}
+  input[type=range]{flex:1;min-width:100px}
+  .fpsval{font-variant-numeric:tabular-nums;font-weight:700}
+  .hint{font-size:12px;color:#777;line-height:1.6;margin-top:10px}
+</style>
+</head>
+<body>
+<header><h1>✏️ ぱらえ</h1><span class="sub">パラパラマンガが作れるお絵かきメモ</span></header>
+<div class="wrap">
+  <div class="stage" id="stage">
+    <canvas id="onionCanvas" width="512" height="384"></canvas>
+    <canvas id="drawCanvas" width="512" height="384"></canvas>
+  </div>
+
+  <div class="panel row" id="frameBar" style="position:sticky;top:6px;z-index:6;box-shadow:0 2px 10px rgba(0,0,0,.08);justify-content:space-between">
+    <span style="display:inline-flex;gap:4px;align-items:center">
+      <button id="prevBtn2" type="button" aria-label="前のコマ">◀</button>
+      <span id="frameInfo" style="font-size:13px;color:#666;min-width:70px;text-align:center">1 / 1 コマ</span>
+      <button id="nextBtn2" type="button" aria-label="次のコマ">▶</button>
+    </span>
+    <span style="display:inline-flex;gap:6px;align-items:center">
+      <button id="addBtn2" type="button" class="primary" style="font-size:16px;padding:10px 14px">＋ 追加</button>
+      <button id="dupBtn2" type="button" style="font-size:16px;padding:10px 12px">⧉ コピー</button>
+    </span>
+  </div>
+
+  <div class="panel row" role="toolbar" aria-label="描画ツール">
+    <span class="label">ツール・色・太さ</span>
+    <button id="toolPen" class="active">✏️ ペン</button>
+    <button id="toolEraser">🧽 消しゴム</button>
+    <button id="toolFill">🪣 塗り</button>
+    <button id="undoBtn">↩️ 戻す</button>
+    <button id="clearBtn">🗑️ 白紙</button>
+    <div class="row" style="margin:0">
+      <button class="color active" data-color="#111111" style="background:#111" aria-label="黒"></button>
+      <button class="color" data-color="#e53935" style="background:#e53935" aria-label="赤"></button>
+      <button class="color" data-color="#1565c0" style="background:#1565c0" aria-label="青"></button>
+      <button class="color" data-color="#2e7d32" style="background:#2e7d32" aria-label="緑"></button>
+      <button class="color" data-color="#fb8c00" style="background:#fb8c00" aria-label="橙"></button>
+      <button class="color" data-color="#6a1b9a" style="background:#6a1b9a" aria-label="紫"></button>
+    </div>
+    <div class="row" style="margin:0;flex:1">
+      <span style="font-size:12px;color:#888">太さ</span>
+      <input type="range" id="sizeRange" min="2" max="24" value="6">
+      <span id="sizeVal">6</span>
+    </div>
+    <label style="font-size:14px"><input type="checkbox" id="onionToggle" checked> 前のコマを透かす</label>
+    <span style="font-size:13px;color:#666">拡大 <span id="zoomVal" class="fpsval">100%</span></span>
+    <button id="zoomResetBtn" type="button">100%に戻す</button>
+    <span style="font-size:11px;color:#888">キャンバス上を2本指で広げる／狭める＝拡大・縮小、2本指で動かす＝移動</span>
+  </div>
+
+  <div class="panel row">
+    <span class="label">再生</span>
+    <button id="playBtn" class="primary">▶ 再生</button>
+    <span style="font-size:12px;color:#888">速度</span>
+    <input type="range" id="fpsRange" min="1" max="24" value="8">
+    <span class="fpsval"><span id="fpsVal">8</span> FPS</span>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin:0 0 6px">
+      <button id="prevBtn">◀ 前</button>
+      <button id="addBtn" class="primary">＋ コマ追加</button>
+      <button id="dupBtn">⧉ コピー</button>
+      <button id="delBtn">コマ削除</button>
+      <button id="nextBtn">次 ▶</button>
+      <button id="moveLeftBtn">⬅ コマを左へ</button>
+      <button id="moveRightBtn">コマを右へ ➡</button>
+    </div>
+    <div id="timeline"></div>
+    <p style="font-size:11px;color:#888;margin:4px 2px 0">サムネイルを長押しすると、そのまま左右にドラッグして順番を入れ替えられます</p>
+  </div>
+
+  <div class="panel row">
+    <span class="label">保存・書き出し（保存はこの端末のブラウザ内です）</span>
+    <button id="saveBtn">💾 保存</button>
+    <button id="pngBtn">画像で保存</button>
+    <button id="webmBtn">🎬 動画(WebM)で保存</button>
+    <button id="shareBtn" class="primary">📤 共有する</button>
+    <button id="sharePngBtn">📤 今のコマを画像で共有</button>
+    <button id="newBtn">新規作成</button>
+  </div>
+
+  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。自動でも保存されますが、大事な作品は動画でも残してください。GIF書き出しは次の版で追加予定です。</p>
+</div>
+<script>
+(() => {
+  // ダブルタップ拡大の防止（iOS Safariは user-scalable=no と touch-action を無視することがあるためJSでも止める）
+  // 2回目のタップは拡大を止める代わりにボタンの click を手動で発火させるので、戻す／コピーの連打はそのまま効く
+  document.addEventListener('dblclick', e => { e.preventDefault(); }, {passive:false});
+  document.addEventListener('gesturestart', e => { e.preventDefault(); }, {passive:false});
+  let lastTouchEnd = 0, reDispatching = false;
+  document.addEventListener('touchend', e => {
+    const now = Date.now();
+    const target = e.target && e.target.closest ? e.target.closest('button, .thumb, label') : null;
+    if (!reDispatching && target && now - lastTouchEnd <= 350) {
+      e.preventDefault();
+      reDispatching = true;
+      try { target.click(); } finally { reDispatching = false; }
+    }
+    lastTouchEnd = now;
+  }, {passive:false});
+  const W=512,H=384;
+  const draw=document.getElementById('drawCanvas'), dctx=draw.getContext('2d',{willReadFrequently:true});
+  const onion=document.getElementById('onionCanvas'), octx=onion.getContext('2d');
+  let frames=[]; // dataURL strings
+  let cur=0, tool='pen', color='#111111', size=6, drawing=false, last=null;
+  let undoStack=[], playing=false, playTimer=null, fps=8;
+
+  function blankURL(){ const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);return c.toDataURL('image/png'); }
+  function snapshot(){ const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);x.drawImage(draw,0,0);return c.toDataURL('image/png'); }
+  function saveCur(){ if(frames.length) frames[cur]=snapshot(); }
+  function loadFrame(i){
+    resetZoom();
+    cur=Math.max(0,Math.min(i,frames.length-1));
+    const img=new Image();
+    img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H); updateOnion(); renderTimeline(); };
+    img.src=frames[cur];
+    undoStack=[];
+  }
+  function updateOnion(){
+    octx.clearRect(0,0,W,H);
+    if(!document.getElementById('onionToggle').checked || cur===0 || playing) return;
+    const img=new Image(); img.onload=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); }; img.src=frames[cur-1];
+  }
+  let suppressThumbClickUntil=0, thumbDrag=null;
+  function persistRaw(){ try{ localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); }catch(e){} }
+  function renderTimeline(){
+    const tl=document.getElementById('timeline'); tl.innerHTML='';
+    frames.forEach((src,i)=>{ const d=document.createElement('div'); d.className='thumb'+(i===cur?' active':'');
+      d.innerHTML=`<img src="${src}" alt=""><span>${i+1}</span>`;
+      d.onclick=()=>{ if(Date.now()<suppressThumbClickUntil) return; saveCur(); loadFrame(i); };
+      // 長押し→ドラッグで並べ替え
+      let pressTimer=null, startX=0, pid=null;
+      d.addEventListener('pointerdown', e=>{
+        if(e.button!==undefined && e.button!==0) return;
+        startX=e.clientX; pid=e.pointerId;
+        pressTimer=setTimeout(()=>{
+          thumbDrag={index:i, startX, el:d};
+          d.classList.add('dragging'); d.style.touchAction='none';
+          try{ d.setPointerCapture(pid); }catch(_){}
+          if(navigator.vibrate) navigator.vibrate(30);
+          saveCur();
+        },450);
+      });
+      d.addEventListener('pointermove', e=>{
+        if(thumbDrag && thumbDrag.el===d){
+          d.style.transform=`translateX(${e.clientX-thumbDrag.startX}px) scale(1.06)`;
+        } else if(pressTimer && Math.abs(e.clientX-startX)>10){
+          clearTimeout(pressTimer); pressTimer=null;
+        }
+      });
+      const finishDrag=e=>{
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer=null; }
+        if(thumbDrag && thumbDrag.el===d){
+          const dx=e.clientX-thumbDrag.startX;
+          const steps=Math.round(dx/80);
+          d.style.transform=''; d.classList.remove('dragging'); d.style.touchAction='';
+          thumbDrag=null; suppressThumbClickUntil=Date.now()+400;
+          if(steps!==0){
+            const target=Math.max(0,Math.min(frames.length-1, i+steps));
+            if(target!==i){
+              const [moved]=frames.splice(i,1); frames.splice(target,0,moved);
+              if(cur===i) cur=target; else if(i<cur && target>=cur) cur--; else if(i>cur && target<=cur) cur++;
+              persistRaw(); loadFrame(cur); return;
+            }
+          }
+          renderTimeline();
+        }
+      };
+      d.addEventListener('pointerup', finishDrag);
+      d.addEventListener('pointercancel', finishDrag);
+      tl.appendChild(d); });
+    // 末尾の「＋」タイル：押すと一番後ろに新しいコマを足してそこへ移動する
+    const addTile=document.createElement('div'); addTile.className='thumb';
+    addTile.innerHTML=`<div style="width:72px;height:54px;border:2px dashed var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--accent);background:#fff">＋</div><span>末尾に追加</span>`;
+    addTile.onclick=()=>{ saveCur(); frames.push(blankURL()); persist(); loadFrame(frames.length-1); };
+    tl.appendChild(addTile);
+    document.getElementById('frameInfo').textContent=`${cur+1} / ${frames.length} コマ`;
+    const active=tl.querySelector('.thumb.active'); if(active) active.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
+  }
+  function persist(){ try{ saveCur(); localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); }catch(e){} }
+  function restore(){ try{ const raw=localStorage.getItem('parae-v1') || localStorage.getItem('paramemo-v1'); if(!raw) return false; const d=JSON.parse(raw); if(d.frames&&d.frames.length){ frames=d.frames; fps=d.fps||8; document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps; return true; } }catch(e){} return false; }
+
+  function pos(e){ const r=draw.getBoundingClientRect(); const p=e.touches?e.touches[0]:e; return { x:(p.clientX-r.left)*W/r.width, y:(p.clientY-r.top)*H/r.height }; }
+  function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>30) undoStack.shift(); }
+  function floodFill(sx,sy,hex){
+    const img=dctx.getImageData(0,0,W,H), data=img.data;
+    const tx=Math.floor(sx), ty=Math.floor(sy); if(tx<0||ty<0||tx>=W||ty>=H) return;
+    const idx=(ty*W+tx)*4, target=[data[idx],data[idx+1],data[idx+2],data[idx+3]];
+    const rgb=hex.match(/\w\w/g).map(h=>parseInt(h,16)); const fill=[rgb[0],rgb[1],rgb[2],255];
+    if(target.join()===fill.join()) return;
+    const match=i=>data[i]===target[0]&&data[i+1]===target[1]&&data[i+2]===target[2]&&data[i+3]===target[3];
+    const stack=[[tx,ty]];
+    while(stack.length){ const [x,y]=stack.pop(); if(x<0||y<0||x>=W||y>=H) continue; const i=(y*W+x)*4; if(!match(i)) continue;
+      data[i]=fill[0];data[i+1]=fill[1];data[i+2]=fill[2];data[i+3]=255;
+      stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]); }
+    dctx.putImageData(img,0,0);
+  }
+  // --- キャンバスのピンチ拡大（1倍〜4倍）・2本指移動 ---
+  const stageEl=document.getElementById('stage');
+  let zoom={scale:1,tx:0,ty:0};
+  function clampZoom(){
+    const w=stageEl.clientWidth||1, h=stageEl.clientHeight||1;
+    zoom.scale=Math.max(1,Math.min(4,zoom.scale));
+    zoom.tx=Math.max(w-w*zoom.scale, Math.min(0, zoom.tx));
+    zoom.ty=Math.max(h-h*zoom.scale, Math.min(0, zoom.ty));
+    if(zoom.scale===1){ zoom.tx=0; zoom.ty=0; }
+  }
+  function applyZoom(){
+    clampZoom();
+    const t=`translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.scale})`;
+    draw.style.transform=t; onion.style.transform=t;
+    const zv=document.getElementById('zoomVal'); if(zv) zv.textContent=Math.round(zoom.scale*100)+'%';
+  }
+  function resetZoom(){ zoom={scale:1,tx:0,ty:0}; applyZoom(); }
+  const pointers=new Map();
+  let pinch=null; // {dist, cx, cy} content point under pinch centre at start (stage px)
+  function pinchMetrics(){
+    const pts=[...pointers.values()];
+    const mx=(pts[0].x+pts[1].x)/2, my=(pts[0].y+pts[1].y)/2;
+    const dist=Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+    const r=stageEl.getBoundingClientRect();
+    return {dist, midStageX:mx-r.left, midStageY:my-r.top};
+  }
+  function cancelStroke(){
+    if(!drawing) return;
+    drawing=false;
+    const prev=undoStack.pop();
+    if(prev){ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); }; img.src=prev; }
+  }
+  function start(e){
+    if(playing) return;
+    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    try{ draw.setPointerCapture(e.pointerId); }catch(_){}
+    if(pointers.size===2){
+      // 2本目が触れたら描きかけを取消し、ピンチ開始
+      cancelStroke();
+      const m=pinchMetrics();
+      pinch={ dist:m.dist, contentX:(m.midStageX-zoom.tx)/zoom.scale, contentY:(m.midStageY-zoom.ty)/zoom.scale, scale:zoom.scale };
+      e.preventDefault(); return;
+    }
+    if(pointers.size>2){ e.preventDefault(); return; }
+    e.preventDefault(); const p=pos(e); pushUndo();
+    if(tool==='fill'){ floodFill(p.x,p.y,color); persist(); renderTimeline(); return; }
+    drawing=true; last=p; drawDot(p);
+  }
+  function move(e){
+    if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pinch && pointers.size===2){
+      e.preventDefault();
+      const m=pinchMetrics();
+      zoom.scale=pinch.scale * (pinch.dist>0 ? m.dist/pinch.dist : 1);
+      zoom.scale=Math.max(1,Math.min(4,zoom.scale));
+      zoom.tx=m.midStageX - pinch.contentX*zoom.scale;
+      zoom.ty=m.midStageY - pinch.contentY*zoom.scale;
+      applyZoom(); return;
+    }
+    if(pinch || pointers.size>=2) return;
+    if(!drawing) return; e.preventDefault(); const p=pos(e);
+    dctx.strokeStyle= tool==='eraser' ? '#ffffff' : color; dctx.lineWidth= tool==='eraser'? size*2 : size;
+    dctx.lineCap='round'; dctx.lineJoin='round'; dctx.beginPath(); dctx.moveTo(last.x,last.y); dctx.lineTo(p.x,p.y); dctx.stroke(); last=p;
+  }
+  function drawDot(p){ dctx.fillStyle= tool==='eraser' ? '#ffffff' : color; dctx.beginPath(); dctx.arc(p.x,p.y,(tool==='eraser'?size:size/2),0,Math.PI*2); dctx.fill(); }
+  function end(e){
+    if(e && e.pointerId!==undefined) pointers.delete(e.pointerId);
+    if(pointers.size<2) pinch=null;
+    if(pointers.size>0) return; // まだ指が残っている間は描画を再開しない
+    if(drawing){ drawing=false; persist(); renderTimeline(); }
+  }
+  draw.addEventListener('pointerdown',start); draw.addEventListener('pointermove',move);
+  window.addEventListener('pointerup',end); window.addEventListener('pointercancel',end);
+  draw.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
+  draw.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+
+  function setTool(t){ tool=t; document.getElementById('toolPen').classList.toggle('active',t==='pen'); document.getElementById('toolEraser').classList.toggle('active',t==='eraser'); document.getElementById('toolFill').classList.toggle('active',t==='fill'); }
+  document.getElementById('toolPen').onclick=()=>setTool('pen');
+  document.getElementById('toolEraser').onclick=()=>setTool('eraser');
+  document.getElementById('toolFill').onclick=()=>setTool('fill');
+  document.querySelectorAll('.color').forEach(b=>b.onclick=()=>{ color=b.dataset.color; document.querySelectorAll('.color').forEach(x=>x.classList.remove('active')); b.classList.add('active'); setTool('pen'); });
+  document.getElementById('sizeRange').oninput=e=>{ size=+e.target.value; document.getElementById('sizeVal').textContent=size; };
+  document.getElementById('onionToggle').onchange=updateOnion;
+  document.getElementById('zoomResetBtn').onclick=()=>resetZoom();
+  document.getElementById('undoBtn').onclick=()=>{ const prev=undoStack.pop(); if(!prev) return; const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); persist(); renderTimeline(); }; img.src=prev; };
+  document.getElementById('clearBtn').onclick=()=>{ if(!confirm('このコマを白紙にしますか？')) return; pushUndo(); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); persist(); renderTimeline(); };
+
+  const goAdd=()=>{ saveCur(); frames.splice(cur+1,0,blankURL()); persist(); loadFrame(cur+1); };
+  const goDup=()=>{ saveCur(); frames.splice(cur+1,0,frames[cur]); persist(); loadFrame(cur+1); };
+  document.getElementById('addBtn').onclick=goAdd;
+  document.getElementById('dupBtn').onclick=goDup;
+  document.getElementById('addBtn2').onclick=goAdd;
+  document.getElementById('dupBtn2').onclick=goDup;
+  document.getElementById('delBtn').onclick=()=>{ if(frames.length<=1){ alert('最後の1コマは消せません'); return; } if(!confirm('このコマを削除しますか？')) return; frames.splice(cur,1); persist(); loadFrame(Math.min(cur,frames.length-1)); };
+  const goPrev=()=>{ saveCur(); loadFrame(cur-1); };
+  const goNext=()=>{ saveCur(); loadFrame(cur+1); };
+  document.getElementById('prevBtn').onclick=goPrev;
+  document.getElementById('nextBtn').onclick=goNext;
+  document.getElementById('prevBtn2').onclick=goPrev;
+  // コマ自体の順番を左右と入れ替える（表示移動ではなく並べ替え）
+  const swapFrame=dir=>{
+    const target=cur+dir;
+    if(target<0 || target>=frames.length) return;
+    saveCur();
+    [frames[cur], frames[target]]=[frames[target], frames[cur]];
+    cur=target;
+    persistRaw(); loadFrame(cur);
+  };
+  document.getElementById('moveLeftBtn').onclick=()=>swapFrame(-1);
+  document.getElementById('moveRightBtn').onclick=()=>swapFrame(1);
+  document.getElementById('nextBtn2').onclick=goNext;
+
+  // --- 意図しない画面更新で作品を失わないための保護 ---
+  // 作品があるか（白紙1コマだけなら確認は出さない）
+  let blankCache=null;
+  function hasWork(){
+    if(frames.length>1) return true;
+    if(!blankCache) blankCache=blankURL();
+    saveCur();
+    return frames[0]!==blankCache;
+  }
+  // リロード／タブを閉じる前に確認を出す（ブラウザ標準の文面になる）
+  window.addEventListener('beforeunload', e=>{
+    persist();
+    if(hasWork()){ e.preventDefault(); e.returnValue=''; }
+  });
+  // 離脱直前・バックグラウンド化でも自動保存する（自動保存先から次回復元される）
+  window.addEventListener('pagehide', ()=>persist());
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') persist(); });
+
+  const playBtn=document.getElementById('playBtn');
+  function stopPlay(){ playing=false; playBtn.textContent='▶ 再生'; if(playTimer) clearInterval(playTimer); playTimer=null; loadFrame(cur); }
+  playBtn.onclick=()=>{ if(playing){ stopPlay(); return; } if(frames.length<2){ alert('コマを2つ以上作ると再生できます'); return; }
+    saveCur(); playing=true; playBtn.textContent='⏸ 停止'; octx.clearRect(0,0,W,H); let i=0;
+    const show=()=>{ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${i+1} / ${frames.length} コマ`; }; img.src=frames[i]; i=(i+1)%frames.length; };
+    show(); playTimer=setInterval(show, 1000/fps); };
+  document.getElementById('fpsRange').oninput=e=>{ fps=+e.target.value; document.getElementById('fpsVal').textContent=fps; if(playing){ stopPlay(); playBtn.onclick(); } persist(); };
+
+  document.getElementById('saveBtn').onclick=()=>{ persist(); alert('保存しました（この端末のブラウザ内）'); };
+  document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます')) return; frames=[blankURL()]; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
+  document.getElementById('pngBtn').onclick=()=>{ saveCur(); const a=document.createElement('a'); a.download='parae-frame.png'; a.href=frames[cur]; a.click(); };
+  async function makeWebmBlob(){
+    const c=document.createElement('canvas'); c.width=W;c.height=H; const x=c.getContext('2d');
+    if(!c.captureStream || typeof MediaRecorder==='undefined') return null;
+    const stream=c.captureStream(fps);
+    let rec; try{ rec=new MediaRecorder(stream,{mimeType:'video/webm'}); }catch(e){ return null; }
+    const chunks=[]; rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+    const stopped=new Promise(r=>{ rec.onstop=r; });
+    rec.start();
+    for(let loop=0; loop<3; loop++){ for(const src of frames){ const img=new Image(); await new Promise(r=>{ img.onload=r; img.onerror=r; img.src=src; }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
+    rec.stop(); await stopped;
+    return new Blob(chunks,{type:'video/webm'});
+  }
+  function downloadBlob(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+  document.getElementById('webmBtn').onclick=async()=>{
+    saveCur(); const blob=await makeWebmBlob();
+    if(!blob){ alert('このブラウザでは動画保存に未対応です。再生しながら画面録画するか、画像保存を使ってください'); return; }
+    downloadBlob(blob,'parae.webm');
+  };
+  async function shareFile(file, fallbackBlob, fallbackName){
+    // スマホの共有シート（ファイル付き）に対応していればそれを使い、なければダウンロードへ
+    if(navigator.share && navigator.canShare){
+      const data={files:[file], title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました'};
+      if(navigator.canShare(data)){
+        try{ await navigator.share(data); }catch(e){ /* キャンセル時は静かに閉じる */ }
+        return;
+      }
+    }
+    if(navigator.share){
+      try{ await navigator.share({title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました'}); downloadBlob(fallbackBlob,fallbackName); return; }catch(e){ if(e && e.name==='AbortError') return; }
+    }
+    downloadBlob(fallbackBlob,fallbackName);
+    alert('この端末ではファイル共有に未対応のため、動画をダウンロードしました。投稿先のアプリからそのファイルを選んでください');
+  }
+  document.getElementById('shareBtn').onclick=async()=>{
+    const btn=document.getElementById('shareBtn'); if(btn.disabled) return;
+    saveCur(); persist();
+    btn.disabled=true; const old=btn.textContent; btn.textContent='動画を作成中…';
+    try{
+      const blob=await makeWebmBlob();
+      if(!blob){ alert('このブラウザでは動画作成に未対応です。「今のコマを画像で共有」は使えます'); return; }
+      const file=new File([blob],'parae.webm',{type:'video/webm'});
+      await shareFile(file, blob, 'parae.webm');
+    } finally { btn.disabled=false; btn.textContent=old; }
+  };
+  document.getElementById('sharePngBtn').onclick=async()=>{
+    saveCur();
+    const blob=await (await fetch(frames[cur])).blob();
+    const file=new File([blob],'parae-frame.png',{type:'image/png'});
+    await shareFile(file, blob, 'parae-frame.png');
+  };
+
+  if(!restore()) frames=[blankURL()];
+  loadFrame(0);
+})();
+</script>
+</body>
+</html>
