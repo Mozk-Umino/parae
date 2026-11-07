@@ -531,7 +531,7 @@
   document.getElementById('fpsRange').addEventListener('change', e=>{ const nf=+e.target.value; if(nf!==committedFps){ const s=captureState(); s.fps=committedFps; undoStack.push(s); if(undoStack.length>30) undoStack.shift(); redoStack=[]; committedFps=nf; } });
 
   document.getElementById('saveBtn').onclick=()=>{ persist(); const el=document.getElementById('saveState'); if(el && el.style.color==='rgb(192, 57, 43)'){ alert('保存できませんでした（保存容量がいっぱいの可能性があります）。「ファイルに保存」を使ってください'); } else { alert('保存しました（この端末のブラウザ内）'); } };
-  document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます（「名前をつけて保存」した作品は残ります）')) return; frames=[blankURL()]; undoStack=[]; redoStack=[]; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
+  document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます（「名前をつけて保存」した作品は残ります）')) return; frames=[blankURL()]; undoStack=[]; redoStack=[]; currentWorkName=null; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
 
   // --- 作品の複数保存（名前付きスロット＋作品ファイル） ---
   const WORKS_KEY='parae-works-v1';
@@ -564,10 +564,10 @@
     const idx=+b.dataset.idx, act=b.dataset.act, works=loadWorks(), w=works[idx]; if(!w) return;
     if(act==='open'){
       if(!confirm(`「${w.name}」を開きますか？今の作品は置き換わります（残したい場合は先に保存してください）`)) return;
-      applyWorkData(w.frames, w.fps);
+      applyWorkData(w.frames, w.fps, w.name);
     } else if(act==='overwrite'){
       if(!confirm(`今の作品で「${w.name}」を上書きしますか？`)) return;
-      saveCur(); works[idx]={name:w.name, savedAt:Date.now(), frames:[...frames], fps};
+      saveCur(); currentWorkName=w.name; works[idx]={name:w.name, savedAt:Date.now(), frames:[...frames], fps};
       try{ storeWorks(works); }catch(err){ alert('ブラウザの保存容量がいっぱいで上書きできませんでした。「ファイルに保存」を使ってください'); return; }
       refreshWorkList(); alert(`「${w.name}」を上書き保存しました`);
     } else if(act==='rename'){
@@ -576,6 +576,7 @@
       if(works.some((x,j)=>j!==idx && x.name===name)){ alert(`「${name}」という名前の作品が既にあります`); return; }
       works[idx]={...w, name};
       try{ storeWorks(works); }catch(err){ alert('保存できませんでした'); return; }
+      if(currentWorkName===w.name) currentWorkName=name;
       refreshWorkList();
     } else if(act==='del'){
       if(!confirm(`「${w.name}」を削除しますか？`)) return;
@@ -595,11 +596,12 @@
     if(idx>=0) works[idx]=entry; else works.push(entry);
     try{ storeWorks(works); }
     catch(e){ alert('ブラウザの保存容量がいっぱいで保存できませんでした。「作品ファイルで保存」を使ってください'); return; }
+    currentWorkName=name;
     refreshWorkList();
     alert(`「${name}」を保存しました`);
   };
-  function applyWorkData(newFrames, newFps){
-    frames=[...newFrames]; fps=newFps||8; committedFps=fps;
+  function applyWorkData(newFrames, newFps, name){
+    frames=[...newFrames]; fps=newFps||8; committedFps=fps; currentWorkName=name||null;
     document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps;
     undoStack=[]; redoStack=[];
     persistRaw(); loadFrame(0);
@@ -621,7 +623,7 @@
       let d; try{ d=JSON.parse(String(reader.result)); }catch(e){ alert('作品ファイルとして読み込めませんでした'); return; }
       if(!d || !Array.isArray(d.frames) || !d.frames.length || !d.frames.every(s=>typeof s==='string' && s.startsWith('data:image'))){ alert('作品ファイルの形式が違うようです'); return; }
       if(!confirm(`作品ファイル（${d.frames.length}コマ）を開きますか？今の作品は置き換わります（残したい場合は先に保存してください）`)) return;
-      applyWorkData(d.frames, d.fps);
+      applyWorkData(d.frames, d.fps, f.name.replace(/\.json$/i,''));
       alert('作品ファイルを読み込みました');
     };
     reader.onerror=()=>alert('ファイルの読み込みに失敗しました');
@@ -678,6 +680,15 @@
     return new Blob(chunks,{type:(rec.mimeType||'video/webm').split(';')[0]});
   }
   function videoExt(blob){ return blob && blob.type.includes('mp4') ? 'mp4' : 'webm'; }
+  // 動画のファイル名：編集中の作品に名前が付いていればその名前、なければ日時で一意にする（parae固定だと何本も貯めたときにかぶるため）
+  let currentWorkName=null;
+  function sanitizeName(s){ return (s||'').replace(/[\\/:*?"<>|#\s]+/g,'_').replace(/^_+|_+$/g,'').slice(0,60); }
+  function videoBaseName(){
+    const n=sanitizeName(currentWorkName);
+    if(n) return n;
+    const now=new Date(); const pad=v=>String(v).padStart(2,'0');
+    return `parae-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  }
   // 動画は作るのに時間がかかる（実時間で録画するため）ので、作品が変わっていない間は作り直さない。
   // キャッシュの照合はコマ画像の中身から作るキーで行う（保存経路に依存しないため）
   let videoCache={key:null, blob:null};
@@ -700,7 +711,7 @@
   document.getElementById('webmBtn').onclick=async()=>{
     saveCur(); const {blob}=await getVideoBlob();
     if(!blob){ alert('このブラウザでは動画保存に未対応です。再生しながら画面録画するか、画像保存を使ってください'); return; }
-    downloadBlob(blob,`parae.${videoExt(blob)}`);
+    downloadBlob(blob,`${videoBaseName()}.${videoExt(blob)}`);
   };
   async function shareFile(file, fallbackBlob, fallbackName, wasFresh){
     // スマホの共有シート（ファイル付き）に対応していればそれを使い、なければダウンロードへ
@@ -728,7 +739,7 @@
       const {blob, fresh}=await getVideoBlob();
       if(!blob){ alert('このブラウザでは動画作成に未対応です。「今のコマを画像で共有」は使えます'); return; }
       if(!fresh) btn.textContent='共有を開いています…';
-      const fname=`parae.${videoExt(blob)}`;
+      const fname=`${videoBaseName()}.${videoExt(blob)}`;
       const file=new File([blob],fname,{type:blob.type});
       await shareFile(file, blob, fname, fresh);
     } finally { btn.disabled=false; btn.textContent=old; }
