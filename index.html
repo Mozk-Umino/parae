@@ -35,6 +35,12 @@
   input[type=range]{flex:1;min-width:100px}
   .fpsval{font-variant-numeric:tabular-nums;font-weight:700}
   .hint{font-size:12px;color:#777;line-height:1.6;margin-top:10px}
+  .pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:60;background:rgba(34,34,34,.93);color:#fff;font-size:13px;padding:9px 14px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.25);display:none;align-items:center;gap:8px;max-width:92vw}
+  .pill .spin{width:14px;height:14px;flex:0 0 auto;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:paraspin .7s linear infinite}
+  @keyframes paraspin{to{transform:rotate(360deg)}}
+  #busyBarWrap{width:110px;height:5px;background:rgba(255,255,255,.25);border-radius:3px;overflow:hidden;display:none}
+  #busyBar{height:100%;width:0%;background:#ffb27a;border-radius:3px;transition:width .15s linear}
+  #savedPill{transition:opacity .3s}
 </style>
 </head>
 <body>
@@ -149,6 +155,8 @@
 
   <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。コピーしたコマは「全体移動」でドラッグすると絵全体をずらせます（PCでは全体移動モードで矢印キーでも微調整できます）。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。「戻す／進める」は描画だけでなく、コマの追加・コピー・削除・並べ替えと再生速度も対象です（最大30回分、コマを移動しても履歴は残ります）。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
 </div>
+<div id="busyPill" class="pill"><span class="spin"></span><span id="busyLabel">処理中…</span><span id="busyBarWrap"><span id="busyBar" style="display:block"></span></span></div>
+<div id="savedPill" class="pill" style="background:rgba(46,125,50,.94)">✓ 保存しました</div>
 <script>
 (() => {
   // ダブルタップ拡大の防止（iOS Safariは user-scalable=no と touch-action を無視することがあるためJSでも止める）
@@ -202,10 +210,43 @@
   }
   let suppressThumbClickUntil=0, thumbDrag=null;
   let multiDelMode=false; const multiSel=new Set();
+  // --- 処理中・保存完了の表示（画面下のピル） ---
+  let busyTimer=null, savedTimer=null;
+  function showBusy(label, estMs){
+    const pill=document.getElementById('busyPill'); if(!pill) return;
+    const sp=document.getElementById('savedPill'); if(sp) sp.style.display='none';
+    if(savedTimer) clearTimeout(savedTimer);
+    document.getElementById('busyLabel').textContent=label;
+    pill.style.display='flex';
+    const wrap=document.getElementById('busyBarWrap'), bar=document.getElementById('busyBar');
+    if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
+    if(estMs && estMs>300){
+      wrap.style.display='block'; bar.style.width='0%';
+      const t0=Date.now();
+      busyTimer=setInterval(()=>{ const p=Math.min(92, (Date.now()-t0)/estMs*100); bar.style.width=p+'%'; },120);
+    } else { wrap.style.display='none'; }
+  }
+  function hideBusy(){
+    if(busyTimer){ clearInterval(busyTimer); busyTimer=null; }
+    const pill=document.getElementById('busyPill'); if(pill) pill.style.display='none';
+  }
+  function flashSaved(){
+    const p=document.getElementById('savedPill'); if(!p) return;
+    p.textContent='✓ 保存しました'; p.style.background='rgba(46,125,50,.94)';
+    p.style.display='flex'; p.style.opacity='1';
+    if(savedTimer) clearTimeout(savedTimer);
+    savedTimer=setTimeout(()=>{ p.style.opacity='0'; setTimeout(()=>{ p.style.display='none'; },320); },1300);
+  }
+  function showSaveFailed(){
+    const p=document.getElementById('savedPill'); if(!p) return;
+    p.textContent='⚠ 保存できませんでした（容量不足の可能性）'; p.style.background='rgba(192,57,43,.95)';
+    p.style.display='flex'; p.style.opacity='1';
+    if(savedTimer) clearTimeout(savedTimer);
+  }
   function noteSave(ok){
     const el=document.getElementById('saveState'); if(!el) return;
-    if(ok){ el.textContent='自動保存：このブラウザに保存しました'; el.style.color='#888'; }
-    else{ el.textContent='自動保存できませんでした（保存容量がいっぱいの可能性があります）。大事な作品は「ファイルに保存」で書き出してください'; el.style.color='#c0392b'; }
+    if(ok){ el.textContent='自動保存：このブラウザに保存しました'; el.style.color='#888'; flashSaved(); }
+    else{ el.textContent='自動保存できませんでした（保存容量がいっぱいの可能性があります）。大事な作品は「ファイルに保存」で書き出してください'; el.style.color='#c0392b'; showSaveFailed(); }
   }
   function persistRaw(){ try{ localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); noteSave(true); }catch(e){ noteSave(false); } }
   function renderTimeline(){
@@ -614,9 +655,12 @@
     push(u32(centralSize)); push(u32(centralStart)); push(u16(0));
     return new Blob(chunks,{type:'application/zip'});
   }
-  document.getElementById('zipBtn').onclick=()=>{ saveCur();
+  document.getElementById('zipBtn').onclick=async ()=>{ saveCur();
+    showBusy('ZIPを作成中…');
+    await new Promise(r=>setTimeout(r,40)); // 先に表示を出してから重い処理に入る
     const entries=frames.map((src,i)=>({ name:`frame-${String(i+1).padStart(3,'0')}.png`, data:dataURLBytes(src) }));
     downloadBlob(makeZipBlob(entries), 'parae-frames.zip');
+    hideBusy();
   };
   async function makeWebmBlob(){
     const c=document.createElement('canvas'); c.width=W;c.height=H; const x=c.getContext('2d');
@@ -643,9 +687,13 @@
     saveCur();
     const key=videoKey();
     if(videoCache.key===key && videoCache.blob) return {blob:videoCache.blob, fresh:false};
-    const blob=await makeWebmBlob();
-    if(blob) videoCache={key, blob};
-    return {blob, fresh:true};
+    const estMs=frames.length*2*1000/Math.max(1,fps);
+    showBusy(`動画を作成中…（約${Math.max(1,Math.round(estMs/1000))}秒）`, estMs);
+    try{
+      const blob=await makeWebmBlob();
+      if(blob) videoCache={key, blob};
+      return {blob, fresh:true};
+    } finally { hideBusy(); }
   }
   function downloadBlob(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
   document.getElementById('webmBtn').onclick=async()=>{
