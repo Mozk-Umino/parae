@@ -106,9 +106,11 @@
       <button id="nextBtn">次 ▶</button>
       <button id="moveLeftBtn">⬅ コマを左へ</button>
       <button id="moveRightBtn">コマを右へ ➡</button>
+      <button id="multiDelBtn">複数削除</button>
+      <button id="multiDelExec" class="primary" style="display:none">選択を削除（0）</button>
     </div>
     <div id="timeline"></div>
-    <p style="font-size:11px;color:#888;margin:4px 2px 0">サムネイルを長押しすると、そのまま左右にドラッグして順番を入れ替えられます</p>
+    <p style="font-size:11px;color:#888;margin:4px 2px 0">サムネイルを長押しすると、そのまま左右にドラッグして順番を入れ替えられます。各サムネイル右上の × でも、そのコマを直接削除できます</p>
   </div>
 
   <div class="panel row">
@@ -194,6 +196,7 @@
     const img=new Image(); img.onload=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); }; img.src=frames[cur-1];
   }
   let suppressThumbClickUntil=0, thumbDrag=null;
+  let multiDelMode=false; const multiSel=new Set();
   function noteSave(ok){
     const el=document.getElementById('saveState'); if(!el) return;
     if(ok){ el.textContent='自動保存：このブラウザに保存しました'; el.style.color='#888'; }
@@ -204,10 +207,21 @@
     const tl=document.getElementById('timeline'); tl.innerHTML='';
     frames.forEach((src,i)=>{ const d=document.createElement('div'); d.className='thumb'+(i===cur?' active':'');
       d.innerHTML=`<img src="${src}" alt=""><span>${i+1}</span>`;
-      d.onclick=()=>{ if(Date.now()<suppressThumbClickUntil) return; saveCur(); loadFrame(i); };
+      if(multiSel.has(i)){ d.style.outline='3px solid #e53935'; d.style.borderRadius='8px'; const ck=document.createElement('span'); ck.textContent='✓'; ck.style.cssText='position:absolute;left:2px;top:0;color:#e53935;font-weight:700;font-size:16px;text-shadow:0 0 3px #fff'; d.appendChild(ck); }
+      if(!multiDelMode){
+        const xb=document.createElement('button'); xb.textContent='×'; xb.setAttribute('aria-label',`コマ${i+1}を削除`);
+        xb.style.cssText='position:absolute;right:0;top:0;width:24px;height:24px;min-height:24px;padding:0;font-size:14px;line-height:1;border-radius:50%;background:#fff;border:1px solid var(--line);color:#c0392b;z-index:2';
+        xb.addEventListener('pointerdown', e=>e.stopPropagation());
+        xb.addEventListener('click', e=>{ e.stopPropagation(); deleteFrameAt(i); });
+        d.appendChild(xb);
+      }
+      d.onclick=()=>{ if(Date.now()<suppressThumbClickUntil) return;
+        if(multiDelMode){ if(multiSel.has(i)) multiSel.delete(i); else multiSel.add(i); renderTimeline(); return; }
+        saveCur(); loadFrame(i); };
       // 長押し→ドラッグで並べ替え
       let pressTimer=null, startX=0, pid=null;
       d.addEventListener('pointerdown', e=>{
+        if(multiDelMode) return;
         if(e.button!==undefined && e.button!==0) return;
         startX=e.clientX; pid=e.pointerId;
         pressTimer=setTimeout(()=>{
@@ -253,6 +267,8 @@
     addTile.onclick=()=>{ pushHistory(); frames.push(blankURL()); persist(); loadFrame(frames.length-1); };
     tl.appendChild(addTile);
     document.getElementById('frameInfo').textContent=`${cur+1} / ${frames.length} コマ`;
+    const db=document.getElementById('delBtn'); if(db) db.textContent=`コマ削除（${cur+1}番）`;
+    const ex=document.getElementById('multiDelExec'); if(ex) ex.textContent=`選択を削除（${multiSel.size}）`;
     const active=tl.querySelector('.thumb.active');
     if(active){ // ページ全体はスクロールさせず、タイムラインの中だけ横に寄せる（scrollIntoViewだと画面ごと下へ動くため）
       const tr=tl.getBoundingClientRect(), ar=active.getBoundingClientRect();
@@ -384,7 +400,38 @@
   document.getElementById('dupBtn').onclick=goDup;
   document.getElementById('addBtn2').onclick=goAdd;
   document.getElementById('dupBtn2').onclick=goDup;
-  document.getElementById('delBtn').onclick=()=>{ if(frames.length<=1){ alert('最後の1コマは消せません'); return; } if(!confirm('このコマを削除しますか？')) return; pushHistory(); frames.splice(cur,1); persist(); loadFrame(Math.min(cur,frames.length-1)); };
+  function deleteFrameAt(i){
+    if(frames.length<=1){ alert('最後の1コマは消せません'); return; }
+    if(!confirm(`コマ ${i+1}（全${frames.length}コマ中）を削除しますか？`)) return;
+    pushHistory();
+    frames.splice(i,1);
+    if(i<cur) cur--;
+    persist(); loadFrame(Math.min(cur,frames.length-1));
+  }
+  document.getElementById('delBtn').onclick=()=>deleteFrameAt(cur);
+  document.getElementById('multiDelBtn').onclick=()=>{
+    multiDelMode=!multiDelMode; multiSel.clear();
+    const b=document.getElementById('multiDelBtn'); b.textContent=multiDelMode?'複数削除：終了':'複数削除'; b.classList.toggle('active', multiDelMode);
+    document.getElementById('multiDelExec').style.display=multiDelMode?'':'none';
+    renderTimeline();
+  };
+  document.getElementById('multiDelExec').onclick=()=>{
+    if(!multiSel.size){ alert('削除するコマをタップして選んでください'); return; }
+    if(multiSel.size>=frames.length){ alert('全部のコマは消せません（最低1コマ残します）'); return; }
+    if(!confirm(`選択した ${multiSel.size} コマをまとめて削除しますか？`)) return;
+    pushHistory();
+    const oldCur=cur;
+    const keep=frames.map((_,i)=>i).filter(i=>!multiSel.has(i));
+    let newCur;
+    if(!multiSel.has(oldCur)){ newCur=keep.indexOf(oldCur); }
+    else { const next=keep.find(v=>v>oldCur); newCur= next!==undefined ? keep.indexOf(next) : keep.length-1; }
+    frames=frames.filter((_,i)=>!multiSel.has(i));
+    cur=Math.max(0, newCur);
+    multiSel.clear(); multiDelMode=false;
+    document.getElementById('multiDelBtn').textContent='複数削除'; document.getElementById('multiDelBtn').classList.remove('active');
+    document.getElementById('multiDelExec').style.display='none';
+    persist(); loadFrame(cur);
+  };
   const goPrev=()=>{ saveCur(); loadFrame(cur-1); };
   const goNext=()=>{ saveCur(); loadFrame(cur+1); };
   document.getElementById('prevBtn').onclick=goPrev;
