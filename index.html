@@ -9,6 +9,17 @@
 <meta property="og:description" content="スマホで描けるパラパラマンガ作成ツール。コマを描いて、つなげて、再生する。">
 <meta property="og:image" content="https://mozk-umino.github.io/parae/og.svg">
 <meta name="twitter:card" content="summary_large_image">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-XX7LRGBW43"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){ window.dataLayer.push(arguments); }
+  function gaCleanUrl(url){ try { const u = new URL(url); return u.origin + u.pathname; } catch { return ''; } }
+  const gaPageLocation = gaCleanUrl(location.href);
+  gtag('js', new Date());
+  gtag('config', 'G-XX7LRGBW43', {send_page_view:false, page_location:gaPageLocation, page_referrer:gaCleanUrl(document.referrer)});
+  gtag('event', 'page_view', {page_location:gaPageLocation, page_title:document.title});
+  function trackParaeEvent(name, params){ if (typeof gtag === 'function') gtag('event', name, params || {}); }
+</script>
 <style>
   :root{--accent:#ff7a1a;--bg:#fff8ec;--panel:#fff;--line:#e8ddd0;--text:#222}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
@@ -39,6 +50,10 @@
   input[type=range]{flex:1;min-width:100px}
   .fpsval{font-variant-numeric:tabular-nums;font-weight:700}
   .hint{font-size:12px;color:#777;line-height:1.6;margin-top:10px}
+  .site-footer{margin-top:16px;padding:14px 4px 2px;border-top:1px solid var(--line);text-align:center;font-size:12px;color:#777;line-height:1.7}
+  .site-footer .hub-link{display:inline-block;font-size:14px;font-weight:700;color:#c85d00;margin-bottom:6px}
+  .site-footer p{margin:4px 0}
+  .site-footer a{color:#777}
   .pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));z-index:60;background:rgba(34,34,34,.93);color:#fff;font-size:13px;padding:9px 14px;border-radius:999px;box-shadow:0 4px 16px rgba(0,0,0,.25);display:none;align-items:center;gap:8px;max-width:92vw}
   .pill .spin{width:14px;height:14px;flex:0 0 auto;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:paraspin .7s linear infinite}
   @keyframes paraspin{to{transform:rotate(360deg)}}
@@ -158,6 +173,10 @@
   </div>
 
   <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。コピーしたコマは「全体移動」でドラッグすると絵全体をずらせます（PCでは全体移動モードで矢印キーでも微調整できます）。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。「戻す／進める」は描画だけでなく、コマの追加・コピー・削除・並べ替えと再生速度も対象です（最大30回分、コマを移動しても履歴は残ります）。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
+  <footer class="site-footer">
+    <p><a id="hubLink" class="hub-link" href="https://mozk-umino.github.io/?utm_source=parae&utm_medium=referral&utm_campaign=tool_footer" target="_blank" rel="noopener">もずくの活動まとめを見る</a></p>
+    <p>このページは Google アナリティクスで閲覧数とボタン・リンクの利用回数を集計しています（Cookieを使います）。作品の内容は送信しません。詳しくは <a href="https://policies.google.com/technologies/partner-sites?hl=ja" target="_blank" rel="noopener">Googleのポリシー</a>。</p>
+  </footer>
 </div>
 <div id="busyPill" class="pill"><span class="spin"></span><span id="busyLabel">処理中…</span><span id="busyBarWrap"><span id="busyBar" style="display:block"></span></span></div>
 <div id="savedPill" class="pill" style="background:rgba(46,125,50,.94)">✓ 保存しました</div>
@@ -772,6 +791,19 @@
     const file=new File([blob],'parae-frame.png',{type:'image/png'});
     await shareFile(file, blob, 'parae-frame.png', false);
   };
+
+  // GA4: 主要なボタンの利用回数だけを数える。作品の内容やファイル名は送らない
+  const paraeTrackEvents={
+    playBtn:'play_animation', zipBtn:'export_zip', webmBtn:'export_video', pngBtn:'export_frame_png',
+    shareBtn:'share_video', sharePngBtn:'share_frame_png', workExportBtn:'export_work_file',
+    saveBtn:'save_work', workSaveAsBtn:'save_work_as'
+  };
+  Object.entries(paraeTrackEvents).forEach(([id,name])=>{
+    const el=document.getElementById(id);
+    if(el) el.addEventListener('click', ()=>trackParaeEvent(name));
+  });
+  const hubLink=document.getElementById('hubLink');
+  if(hubLink) hubLink.addEventListener('click', ()=>trackParaeEvent('hub_click', {link_url:hubLink.href, block:'parae_footer'}));
 
   if(!restore()) frames=[blankURL()];
   loadFrame(0);
