@@ -144,7 +144,7 @@
     <button id="sharePngBtn">📤 今のコマを画像で共有</button>
   </div>
 
-  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
+  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。「戻す／進める」は描画だけでなく、コマの追加・コピー・削除・並べ替えと再生速度も対象です（最大30回分、コマを移動しても履歴は残ります）。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
 </div>
 <script>
 (() => {
@@ -179,7 +179,15 @@
     const img=new Image();
     img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H); updateOnion(); renderTimeline(); };
     img.src=frames[cur];
-    undoStack=[]; redoStack=[];
+  }
+  // --- 作品全体の履歴（描画・コマ操作・FPSをまとめて戻す／進める） ---
+  let committedFps=8;
+  function captureState(){ saveCur(); return {frames:[...frames], cur, fps}; }
+  function pushHistory(){ undoStack.push(captureState()); if(undoStack.length>30) undoStack.shift(); redoStack=[]; }
+  function applyState(s){
+    frames=[...s.frames]; cur=Math.max(0,Math.min(s.cur, frames.length-1)); fps=s.fps||8; committedFps=fps;
+    document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps;
+    persistRaw(); loadFrame(cur);
   }
   function updateOnion(){
     octx.clearRect(0,0,W,H);
@@ -228,6 +236,7 @@
           if(steps!==0){
             const target=Math.max(0,Math.min(frames.length-1, i+steps));
             if(target!==i){
+              pushHistory();
               const [moved]=frames.splice(i,1); frames.splice(target,0,moved);
               if(cur===i) cur=target; else if(i<cur && target>=cur) cur--; else if(i>cur && target<=cur) cur++;
               persistRaw(); loadFrame(cur); return;
@@ -242,16 +251,20 @@
     // 末尾の「＋」タイル：押すと一番後ろに新しいコマを足してそこへ移動する
     const addTile=document.createElement('div'); addTile.className='thumb';
     addTile.innerHTML=`<div style="width:72px;height:54px;border:2px dashed var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--accent);background:#fff">＋</div><span>末尾に追加</span>`;
-    addTile.onclick=()=>{ saveCur(); frames.push(blankURL()); persist(); loadFrame(frames.length-1); };
+    addTile.onclick=()=>{ pushHistory(); frames.push(blankURL()); persist(); loadFrame(frames.length-1); };
     tl.appendChild(addTile);
     document.getElementById('frameInfo').textContent=`${cur+1} / ${frames.length} コマ`;
-    const active=tl.querySelector('.thumb.active'); if(active) active.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
+    const active=tl.querySelector('.thumb.active');
+    if(active){ // ページ全体はスクロールさせず、タイムラインの中だけ横に寄せる（scrollIntoViewだと画面ごと下へ動くため）
+      const tr=tl.getBoundingClientRect(), ar=active.getBoundingClientRect();
+      tl.scrollLeft += (ar.left - tr.left) - (tl.clientWidth/2 - ar.width/2);
+    }
   }
   function persist(){ try{ saveCur(); localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); noteSave(true); }catch(e){ noteSave(false); } }
-  function restore(){ try{ const raw=localStorage.getItem('parae-v1') || localStorage.getItem('paramemo-v1'); if(!raw) return false; const d=JSON.parse(raw); if(d.frames&&d.frames.length){ frames=d.frames; fps=d.fps||8; document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps; return true; } }catch(e){} return false; }
+  function restore(){ try{ const raw=localStorage.getItem('parae-v1') || localStorage.getItem('paramemo-v1'); if(!raw) return false; const d=JSON.parse(raw); if(d.frames&&d.frames.length){ frames=d.frames; fps=d.fps||8; committedFps=fps; document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps; return true; } }catch(e){} return false; }
 
   function pos(e){ const r=draw.getBoundingClientRect(); const p=e.touches?e.touches[0]:e; return { x:(p.clientX-r.left)*W/r.width, y:(p.clientY-r.top)*H/r.height }; }
-  function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>30) undoStack.shift(); redoStack=[]; }
+  function pushUndo(){ pushHistory(); }
   function floodFill(sx,sy,hex){
     const img=dctx.getImageData(0,0,W,H), data=img.data;
     const tx=Math.floor(sx), ty=Math.floor(sy); if(tx<0||ty<0||tx>=W||ty>=H) return;
@@ -294,8 +307,8 @@
   function cancelStroke(){
     if(!drawing) return;
     drawing=false;
-    const prev=undoStack.pop();
-    if(prev){ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); }; img.src=prev; }
+    undoStack.pop(); // ピンチ開始で中断した描画は履歴に残さない。キャンバスは保存済みの現在コマに戻す
+    const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); }; img.src=frames[cur];
   }
   function start(e){
     if(playing) return;
@@ -349,18 +362,17 @@
   document.getElementById('sizeRange').oninput=e=>{ size=+e.target.value; document.getElementById('sizeVal').textContent=size; };
   document.getElementById('onionToggle').onchange=updateOnion;
   document.getElementById('zoomResetBtn').onclick=()=>resetZoom();
-  function applyCanvasImage(src){ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); persist(); renderTimeline(); }; img.src=src; }
-  document.getElementById('undoBtn').onclick=()=>{ const prev=undoStack.pop(); if(!prev) return; redoStack.push(snapshot()); applyCanvasImage(prev); };
-  document.getElementById('redoBtn').onclick=()=>{ const next=redoStack.pop(); if(!next) return; undoStack.push(snapshot()); if(undoStack.length>30) undoStack.shift(); applyCanvasImage(next); };
+  document.getElementById('undoBtn').onclick=()=>{ if(playing) stopPlay(); const prev=undoStack.pop(); if(!prev) return; redoStack.push(captureState()); applyState(prev); };
+  document.getElementById('redoBtn').onclick=()=>{ if(playing) stopPlay(); const next=redoStack.pop(); if(!next) return; undoStack.push(captureState()); if(undoStack.length>30) undoStack.shift(); applyState(next); };
   document.getElementById('clearBtn').onclick=()=>{ if(!confirm('このコマを白紙にしますか？')) return; pushUndo(); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); persist(); renderTimeline(); };
 
-  const goAdd=()=>{ saveCur(); frames.splice(cur+1,0,blankURL()); persist(); loadFrame(cur+1); };
-  const goDup=()=>{ saveCur(); frames.splice(cur+1,0,frames[cur]); persist(); loadFrame(cur+1); };
+  const goAdd=()=>{ pushHistory(); frames.splice(cur+1,0,blankURL()); persist(); loadFrame(cur+1); };
+  const goDup=()=>{ pushHistory(); frames.splice(cur+1,0,frames[cur]); persist(); loadFrame(cur+1); };
   document.getElementById('addBtn').onclick=goAdd;
   document.getElementById('dupBtn').onclick=goDup;
   document.getElementById('addBtn2').onclick=goAdd;
   document.getElementById('dupBtn2').onclick=goDup;
-  document.getElementById('delBtn').onclick=()=>{ if(frames.length<=1){ alert('最後の1コマは消せません'); return; } if(!confirm('このコマを削除しますか？')) return; frames.splice(cur,1); persist(); loadFrame(Math.min(cur,frames.length-1)); };
+  document.getElementById('delBtn').onclick=()=>{ if(frames.length<=1){ alert('最後の1コマは消せません'); return; } if(!confirm('このコマを削除しますか？')) return; pushHistory(); frames.splice(cur,1); persist(); loadFrame(Math.min(cur,frames.length-1)); };
   const goPrev=()=>{ saveCur(); loadFrame(cur-1); };
   const goNext=()=>{ saveCur(); loadFrame(cur+1); };
   document.getElementById('prevBtn').onclick=goPrev;
@@ -370,7 +382,7 @@
   const swapFrame=dir=>{
     const target=cur+dir;
     if(target<0 || target>=frames.length) return;
-    saveCur();
+    pushHistory();
     [frames[cur], frames[target]]=[frames[target], frames[cur]];
     cur=target;
     persistRaw(); loadFrame(cur);
@@ -404,9 +416,10 @@
     const show=()=>{ const img=new Image(); img.onload=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); document.getElementById('frameInfo').textContent=`${i+1} / ${frames.length} コマ`; }; img.src=frames[i]; i=(i+1)%frames.length; };
     show(); playTimer=setInterval(show, 1000/fps); };
   document.getElementById('fpsRange').oninput=e=>{ fps=+e.target.value; document.getElementById('fpsVal').textContent=fps; if(playing){ stopPlay(); playBtn.onclick(); } persist(); };
+  document.getElementById('fpsRange').addEventListener('change', e=>{ const nf=+e.target.value; if(nf!==committedFps){ const s=captureState(); s.fps=committedFps; undoStack.push(s); if(undoStack.length>30) undoStack.shift(); redoStack=[]; committedFps=nf; } });
 
   document.getElementById('saveBtn').onclick=()=>{ persist(); const el=document.getElementById('saveState'); if(el && el.style.color==='rgb(192, 57, 43)'){ alert('保存できませんでした（保存容量がいっぱいの可能性があります）。「ファイルに保存」を使ってください'); } else { alert('保存しました（この端末のブラウザ内）'); } };
-  document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます（「名前をつけて保存」した作品は残ります）')) return; frames=[blankURL()]; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
+  document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます（「名前をつけて保存」した作品は残ります）')) return; frames=[blankURL()]; undoStack=[]; redoStack=[]; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
 
   // --- 作品の複数保存（名前付きスロット＋作品ファイル） ---
   const WORKS_KEY='parae-works-v1';
@@ -435,8 +448,9 @@
     alert(`「${name}」を保存しました`);
   };
   function applyWorkData(newFrames, newFps){
-    frames=[...newFrames]; fps=newFps||8;
+    frames=[...newFrames]; fps=newFps||8; committedFps=fps;
     document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps;
+    undoStack=[]; redoStack=[];
     persistRaw(); loadFrame(0);
   }
   document.getElementById('workOpenBtn').onclick=()=>{
