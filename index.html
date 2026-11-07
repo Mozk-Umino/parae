@@ -63,6 +63,7 @@
       <button id="toolPen" class="active">✏️ ペン</button>
       <button id="toolEraser">🧽 消しゴム</button>
       <button id="toolFill">🪣 塗り</button>
+      <button id="toolMove">✥ 全体移動</button>
     </div>
     <div style="display:flex;gap:6px;flex-basis:100%">
       <button id="undoBtn">↩️ 戻す</button>
@@ -144,7 +145,7 @@
     <button id="sharePngBtn">📤 今のコマを画像で共有</button>
   </div>
 
-  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。「戻す／進める」は描画だけでなく、コマの追加・コピー・削除・並べ替えと再生速度も対象です（最大30回分、コマを移動しても履歴は残ります）。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
+  <p class="hint">使い方：指で描く →「コマ追加」→少しずらして描く→「再生」。コピーしたコマは「全体移動」でドラッグすると絵全体をずらせます（PCでは全体移動モードで矢印キーでも微調整できます）。前のコマが薄く透けるので動きが作りやすいです。キャンバスは2本指で拡大（1〜4倍）・移動できます。コマを移動したり再生すると100%に戻ります。「戻す／進める」は描画だけでなく、コマの追加・コピー・削除・並べ替えと再生速度も対象です（最大30回分、コマを移動しても履歴は残ります）。自動保存されるのは「今の作品」1つだけです。別の作品として残したいときは「名前をつけて保存」を使うと、一覧からいつでも編集に戻れます。端末を変えるときや保険には、ぱらえファイルの「ファイルに保存」がおすすめです。GIF書き出しは次の版で追加予定です。</p>
 </div>
 <script>
 (() => {
@@ -167,7 +168,7 @@
   const draw=document.getElementById('drawCanvas'), dctx=draw.getContext('2d',{willReadFrequently:true});
   const onion=document.getElementById('onionCanvas'), octx=onion.getContext('2d');
   let frames=[]; // dataURL strings
-  let cur=0, tool='pen', color='#111111', size=6, drawing=false, last=null;
+  let cur=0, tool='pen', color='#111111', size=6, drawing=false, last=null, moveDrag=null;
   let undoStack=[], redoStack=[], playing=false, playTimer=null, fps=8;
 
   function blankURL(){ const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);return c.toDataURL('image/png'); }
@@ -324,6 +325,7 @@
     if(pointers.size>2){ e.preventDefault(); return; }
     e.preventDefault(); const p=pos(e); pushUndo();
     if(tool==='fill'){ floodFill(p.x,p.y,color); persist(); renderTimeline(); return; }
+    if(tool==='move'){ drawing=true; last=p; moveDrag={ox:p.x, oy:p.y, src:document.createElement('canvas')}; moveDrag.src.width=W; moveDrag.src.height=H; moveDrag.src.getContext('2d').drawImage(draw,0,0); return; }
     drawing=true; last=p; drawDot(p);
   }
   function move(e){
@@ -339,6 +341,7 @@
     }
     if(pinch || pointers.size>=2) return;
     if(!drawing) return; e.preventDefault(); const p=pos(e);
+    if(tool==='move' && moveDrag){ const dx=p.x-moveDrag.ox, dy=p.y-moveDrag.oy; dctx.clearRect(0,0,W,H); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); dctx.drawImage(moveDrag.src, dx, dy); return; }
     dctx.strokeStyle= tool==='eraser' ? '#ffffff' : color; dctx.lineWidth= tool==='eraser'? size*2 : size;
     dctx.lineCap='round'; dctx.lineJoin='round'; dctx.beginPath(); dctx.moveTo(last.x,last.y); dctx.lineTo(p.x,p.y); dctx.stroke(); last=p;
   }
@@ -347,17 +350,28 @@
     if(e && e.pointerId!==undefined) pointers.delete(e.pointerId);
     if(pointers.size<2) pinch=null;
     if(pointers.size>0) return; // まだ指が残っている間は描画を再開しない
-    if(drawing){ drawing=false; persist(); renderTimeline(); }
+    if(drawing){ drawing=false; moveDrag=null; persist(); renderTimeline(); }
   }
   draw.addEventListener('pointerdown',start); draw.addEventListener('pointermove',move);
   window.addEventListener('pointerup',end); window.addEventListener('pointercancel',end);
   draw.addEventListener('touchstart',e=>e.preventDefault(),{passive:false});
   draw.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
 
-  function setTool(t){ tool=t; document.getElementById('toolPen').classList.toggle('active',t==='pen'); document.getElementById('toolEraser').classList.toggle('active',t==='eraser'); document.getElementById('toolFill').classList.toggle('active',t==='fill'); }
+  function setTool(t){ tool=t; document.getElementById('toolPen').classList.toggle('active',t==='pen'); document.getElementById('toolEraser').classList.toggle('active',t==='eraser'); document.getElementById('toolFill').classList.toggle('active',t==='fill'); document.getElementById('toolMove').classList.toggle('active',t==='move'); }
   document.getElementById('toolPen').onclick=()=>setTool('pen');
   document.getElementById('toolEraser').onclick=()=>setTool('eraser');
   document.getElementById('toolFill').onclick=()=>setTool('fill');
+  document.getElementById('toolMove').onclick=()=>setTool('move');
+  // 全体移動モードでは矢印キーでもずらせる（PC向け、Shiftで10px）
+  window.addEventListener('keydown', e=>{
+    if(tool!=='move' || playing) return;
+    const step=e.shiftKey?10:1; let dx=0, dy=0;
+    if(e.key==='ArrowLeft') dx=-step; else if(e.key==='ArrowRight') dx=step; else if(e.key==='ArrowUp') dy=-step; else if(e.key==='ArrowDown') dy=step; else return;
+    e.preventDefault(); pushHistory();
+    const src=document.createElement('canvas'); src.width=W; src.height=H; src.getContext('2d').drawImage(draw,0,0);
+    dctx.clearRect(0,0,W,H); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); dctx.drawImage(src,dx,dy);
+    persist(); renderTimeline();
+  });
   document.querySelectorAll('.color').forEach(b=>b.onclick=()=>{ color=b.dataset.color; document.querySelectorAll('.color').forEach(x=>x.classList.remove('active')); b.classList.add('active'); setTool('pen'); });
   document.getElementById('sizeRange').oninput=e=>{ size=+e.target.value; document.getElementById('sizeVal').textContent=size; };
   document.getElementById('onionToggle').onchange=updateOnion;
