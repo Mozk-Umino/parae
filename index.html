@@ -182,12 +182,20 @@
   // 別のコマの絵が今のコマにコピーされてしまうため、一致していない間は保存しない
   let canvasSynced=false, loadToken=0;
   function saveCur(){ if(frames.length && canvasSynced) frames[cur]=snapshot(); }
+  // 表示用：白を抜いて透明にし、下の透かし（前のコマ）が透けて見えるようにする。
+  // 保存データ側は今までどおり白背景のまま（snapshot() が白で合成する）
+  function displayFrame(img){
+    dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H);
+    const id=dctx.getImageData(0,0,W,H), d=id.data;
+    for(let k=0;k<d.length;k+=4){ if(d[k]>248 && d[k+1]>248 && d[k+2]>248) d[k+3]=0; }
+    dctx.putImageData(id,0,0);
+  }
   function loadFrame(i){
     resetZoom();
     cur=Math.max(0,Math.min(i,frames.length-1));
     const token=++loadToken;
     const url=frames[cur]; const img=imgFor(url);
-    const drawIt=()=>{ if(token!==loadToken) return; dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0,W,H); canvasSynced=true; updateOnion(); renderTimeline(); };
+    const drawIt=()=>{ if(token!==loadToken) return; displayFrame(img); canvasSynced=true; updateOnion(); renderTimeline(); };
     if(img.complete && img.naturalWidth){ drawIt(); }
     else { canvasSynced=false; img.onload=drawIt; }
   }
@@ -371,7 +379,7 @@
     drawing=false;
     undoStack.pop(); // ピンチ開始で中断した描画は履歴に残さない。キャンバスは保存済みの現在コマに戻す
     const img=imgFor(frames[cur]);
-    const drawIt=()=>{ dctx.clearRect(0,0,W,H); dctx.drawImage(img,0,0); };
+    const drawIt=()=>{ displayFrame(img); };
     if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt;
   }
   function start(e){
@@ -408,11 +416,14 @@
     }
     if(pinch || pointers.size>=2) return;
     if(!drawing) return; e.preventDefault(); const p=pos(e);
-    if(tool==='move' && moveDrag){ const dx=p.x-moveDrag.ox, dy=p.y-moveDrag.oy; dctx.clearRect(0,0,W,H); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); dctx.drawImage(moveDrag.src, dx, dy); return; }
-    dctx.strokeStyle= tool==='eraser' ? '#ffffff' : color; dctx.lineWidth= tool==='eraser'? size*2 : size;
+    if(tool==='move' && moveDrag){ const dx=p.x-moveDrag.ox, dy=p.y-moveDrag.oy; dctx.clearRect(0,0,W,H); dctx.drawImage(moveDrag.src, dx, dy); return; }
+    if(tool==='eraser'){ dctx.globalCompositeOperation='destination-out'; dctx.strokeStyle='#000'; }
+    else { dctx.globalCompositeOperation='source-over'; dctx.strokeStyle=color; }
+    dctx.lineWidth= tool==='eraser'? size*2 : size;
     dctx.lineCap='round'; dctx.lineJoin='round'; dctx.beginPath(); dctx.moveTo(last.x,last.y); dctx.lineTo(p.x,p.y); dctx.stroke(); last=p;
+    dctx.globalCompositeOperation='source-over';
   }
-  function drawDot(p){ dctx.fillStyle= tool==='eraser' ? '#ffffff' : color; dctx.beginPath(); dctx.arc(p.x,p.y,(tool==='eraser'?size:size/2),0,Math.PI*2); dctx.fill(); }
+  function drawDot(p){ if(tool==='eraser'){ dctx.globalCompositeOperation='destination-out'; dctx.fillStyle='#000'; } else { dctx.globalCompositeOperation='source-over'; dctx.fillStyle=color; } dctx.beginPath(); dctx.arc(p.x,p.y,(tool==='eraser'?size:size/2),0,Math.PI*2); dctx.fill(); dctx.globalCompositeOperation='source-over'; }
   function end(e){
     if(e && e.pointerId!==undefined) pointers.delete(e.pointerId);
     if(pointers.size<2) pinch=null;
@@ -436,7 +447,7 @@
     if(e.key==='ArrowLeft') dx=-step; else if(e.key==='ArrowRight') dx=step; else if(e.key==='ArrowUp') dy=-step; else if(e.key==='ArrowDown') dy=step; else return;
     e.preventDefault(); pushHistory();
     const src=document.createElement('canvas'); src.width=W; src.height=H; src.getContext('2d').drawImage(draw,0,0);
-    dctx.clearRect(0,0,W,H); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); dctx.drawImage(src,dx,dy);
+    dctx.clearRect(0,0,W,H); dctx.drawImage(src,dx,dy);
     persist(); renderTimeline();
   });
   document.querySelectorAll('.color').forEach(b=>b.onclick=()=>{ color=b.dataset.color; document.querySelectorAll('.color').forEach(x=>x.classList.remove('active')); b.classList.add('active'); setTool('pen'); });
@@ -445,7 +456,7 @@
   document.getElementById('zoomResetBtn').onclick=()=>resetZoom();
   document.getElementById('undoBtn').onclick=()=>{ if(playing) stopPlay(); const prev=undoStack.pop(); if(!prev) return; redoStack.push(captureState()); applyState(prev); };
   document.getElementById('redoBtn').onclick=()=>{ if(playing) stopPlay(); const next=redoStack.pop(); if(!next) return; undoStack.push(captureState()); if(undoStack.length>30) undoStack.shift(); applyState(next); };
-  document.getElementById('clearBtn').onclick=()=>{ if(!confirm('このコマを白紙にしますか？')) return; pushUndo(); dctx.fillStyle='#fff'; dctx.fillRect(0,0,W,H); persist(); renderTimeline(); };
+  document.getElementById('clearBtn').onclick=()=>{ if(!confirm('このコマを白紙にしますか？')) return; pushUndo(); dctx.clearRect(0,0,W,H); persist(); renderTimeline(); };
 
   const goAdd=()=>{ pushHistory(); frames.splice(cur+1,0,blankURL()); persist(); loadFrame(cur+1); };
   const goDup=()=>{ pushHistory(); frames.splice(cur+1,0,frames[cur]); persist(); loadFrame(cur+1); };
