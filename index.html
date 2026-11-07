@@ -58,7 +58,10 @@
   </div>
 
   <div class="panel row" role="toolbar" aria-label="描画ツール">
-    <span class="label">ツール・色・太さ</span>
+    <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+      <span class="label" style="width:auto">ツール・色・太さ</span>
+      <button id="onionBtn" type="button" class="active" style="min-height:36px;padding:6px 10px;font-size:13px">前コマ透かし</button>
+    </div>
     <div style="display:flex;gap:6px;flex-basis:100%">
       <button id="toolPen" class="active">✏️ ペン</button>
       <button id="toolEraser">🧽 消しゴム</button>
@@ -83,7 +86,6 @@
       <input type="range" id="sizeRange" min="2" max="24" value="6">
       <span id="sizeVal">6</span>
     </div>
-    <label style="font-size:14px"><input type="checkbox" id="onionToggle" checked> 前のコマを透かす</label>
     <span style="font-size:13px;color:#666">拡大 <span id="zoomVal" class="fpsval">100%</span></span>
     <button id="zoomResetBtn" type="button">100%に戻す</button>
     <span style="font-size:11px;color:#888">キャンバス上を2本指で広げる／狭める＝拡大・縮小、2本指で動かす＝移動</span>
@@ -190,9 +192,10 @@
     document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps;
     persistRaw(); loadFrame(cur);
   }
+  let onionOn=true;
   function updateOnion(){
     octx.clearRect(0,0,W,H);
-    if(!document.getElementById('onionToggle').checked || cur===0 || playing) return;
+    if(!onionOn || cur===0 || playing) return;
     const img=imgFor(frames[cur-1]);
     const drawIt=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); };
     if(img.complete && img.naturalWidth) drawIt(); else img.onload=drawIt;
@@ -396,7 +399,7 @@
   });
   document.querySelectorAll('.color').forEach(b=>b.onclick=()=>{ color=b.dataset.color; document.querySelectorAll('.color').forEach(x=>x.classList.remove('active')); b.classList.add('active'); setTool('pen'); });
   document.getElementById('sizeRange').oninput=e=>{ size=+e.target.value; document.getElementById('sizeVal').textContent=size; };
-  document.getElementById('onionToggle').onchange=updateOnion;
+  document.getElementById('onionBtn').onclick=()=>{ onionOn=!onionOn; document.getElementById('onionBtn').classList.toggle('active', onionOn); updateOnion(); };
   document.getElementById('zoomResetBtn').onclick=()=>resetZoom();
   document.getElementById('undoBtn').onclick=()=>{ if(playing) stopPlay(); const prev=undoStack.pop(); if(!prev) return; redoStack.push(captureState()); applyState(prev); };
   document.getElementById('redoBtn').onclick=()=>{ if(playing) stopPlay(); const next=redoStack.pop(); if(!next) return; undoStack.push(captureState()); if(undoStack.length>30) undoStack.shift(); applyState(next); };
