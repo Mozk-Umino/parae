@@ -59,12 +59,16 @@
 
   <div class="panel row" role="toolbar" aria-label="描画ツール">
     <span class="label">ツール・色・太さ</span>
-    <button id="toolPen" class="active">✏️ ペン</button>
-    <button id="toolEraser">🧽 消しゴム</button>
-    <button id="toolFill">🪣 塗り</button>
-    <button id="undoBtn">↩️ 戻す</button>
-    <button id="redoBtn">↪️ 進める</button>
-    <button id="clearBtn">🗑️ 白紙</button>
+    <div style="display:flex;gap:6px;flex-basis:100%">
+      <button id="toolPen" class="active">✏️ ペン</button>
+      <button id="toolEraser">🧽 消しゴム</button>
+      <button id="toolFill">🪣 塗り</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-basis:100%">
+      <button id="undoBtn">↩️ 戻す</button>
+      <button id="redoBtn">↪️ 進める</button>
+      <button id="clearBtn">🗑️ 白紙</button>
+    </div>
     <div class="row" style="margin:0">
       <button class="color active" data-color="#111111" style="background:#111" aria-label="黒"></button>
       <button class="color" data-color="#e53935" style="background:#e53935" aria-label="赤"></button>
@@ -107,16 +111,23 @@
   </div>
 
   <div class="panel row">
-    <span class="label">ぱらえファイル（編集できる形で保存）</span>
+    <span class="label">ぱらえファイル：ブラウザ上で保存</span>
     <button id="newBtn">新規</button>
     <button id="saveBtn">💾 保存</button>
     <button id="workSaveAsBtn">名前をつけて保存</button>
     <select id="workList" style="font-size:14px;padding:8px;max-width:60vw"><option value="">保存した作品…</option></select>
     <button id="workOpenBtn">開く</button>
     <button id="workDelBtn">削除</button>
+    <span id="saveState" style="font-size:12px;color:#888;width:100%"></span>
+    <span style="font-size:11px;color:#888;width:100%">注意：この端末の、このブラウザの中にだけ保存されます。ファイルにはなりません。他の端末や他のブラウザでは開けません。ブラウザのデータを消すと一緒に消えます。保存容量には上限があります（目安 約5MB）。</span>
+  </div>
+
+  <div class="panel row">
+    <span class="label">ぱらえファイル：ファイルとして保存</span>
     <button id="workExportBtn">ファイルに保存</button>
     <button id="workImportBtn">ファイルを開く</button>
     <input type="file" id="workFile" accept="application/json,.json" style="display:none">
+    <span style="font-size:11px;color:#888;width:100%">注意：ダウンロード先に「parae-日時.json」というファイルが保存されます。編集を続けるときは「ファイルを開く」で読み込んでください。バックアップや、別の端末へ移すときはこちらを使ってください。</span>
   </div>
 
   <div class="panel row">
@@ -124,6 +135,7 @@
     <button id="stripBtn">画像で保存（全コマ）</button>
     <button id="webmBtn">🎬 動画で保存</button>
     <button id="pngBtn">今のコマを保存</button>
+    <span style="font-size:11px;color:#888;width:100%">画像・動画のファイルとして、ダウンロード先に保存されます。</span>
   </div>
 
   <div class="panel row">
@@ -175,7 +187,12 @@
     const img=new Image(); img.onload=()=>{ octx.clearRect(0,0,W,H); octx.drawImage(img,0,0,W,H); }; img.src=frames[cur-1];
   }
   let suppressThumbClickUntil=0, thumbDrag=null;
-  function persistRaw(){ try{ localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); }catch(e){} }
+  function noteSave(ok){
+    const el=document.getElementById('saveState'); if(!el) return;
+    if(ok){ el.textContent='自動保存：このブラウザに保存しました'; el.style.color='#888'; }
+    else{ el.textContent='自動保存できませんでした（保存容量がいっぱいの可能性があります）。大事な作品は「ファイルに保存」で書き出してください'; el.style.color='#c0392b'; }
+  }
+  function persistRaw(){ try{ localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); noteSave(true); }catch(e){ noteSave(false); } }
   function renderTimeline(){
     const tl=document.getElementById('timeline'); tl.innerHTML='';
     frames.forEach((src,i)=>{ const d=document.createElement('div'); d.className='thumb'+(i===cur?' active':'');
@@ -230,7 +247,7 @@
     document.getElementById('frameInfo').textContent=`${cur+1} / ${frames.length} コマ`;
     const active=tl.querySelector('.thumb.active'); if(active) active.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
   }
-  function persist(){ try{ saveCur(); localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); }catch(e){} }
+  function persist(){ try{ saveCur(); localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); noteSave(true); }catch(e){ noteSave(false); } }
   function restore(){ try{ const raw=localStorage.getItem('parae-v1') || localStorage.getItem('paramemo-v1'); if(!raw) return false; const d=JSON.parse(raw); if(d.frames&&d.frames.length){ frames=d.frames; fps=d.fps||8; document.getElementById('fpsRange').value=fps; document.getElementById('fpsVal').textContent=fps; return true; } }catch(e){} return false; }
 
   function pos(e){ const r=draw.getBoundingClientRect(); const p=e.touches?e.touches[0]:e; return { x:(p.clientX-r.left)*W/r.width, y:(p.clientY-r.top)*H/r.height }; }
@@ -388,7 +405,7 @@
     show(); playTimer=setInterval(show, 1000/fps); };
   document.getElementById('fpsRange').oninput=e=>{ fps=+e.target.value; document.getElementById('fpsVal').textContent=fps; if(playing){ stopPlay(); playBtn.onclick(); } persist(); };
 
-  document.getElementById('saveBtn').onclick=()=>{ persist(); alert('保存しました（この端末のブラウザ内）'); };
+  document.getElementById('saveBtn').onclick=()=>{ persist(); const el=document.getElementById('saveState'); if(el && el.style.color==='rgb(192, 57, 43)'){ alert('保存できませんでした（保存容量がいっぱいの可能性があります）。「ファイルに保存」を使ってください'); } else { alert('保存しました（この端末のブラウザ内）'); } };
   document.getElementById('newBtn').onclick=()=>{ if(!confirm('新規作成しますか？今の作品は消えます（「名前をつけて保存」した作品は残ります）')) return; frames=[blankURL()]; localStorage.removeItem('parae-v1'); localStorage.removeItem('paramemo-v1'); loadFrame(0); };
 
   // --- 作品の複数保存（名前付きスロット＋作品ファイル） ---
