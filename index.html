@@ -9,15 +9,11 @@
 <meta property="og:description" content="スマホで描けるパラパラマンガ作成ツール。コマを描いて、つなげて、再生する。">
 <meta property="og:image" content="https://mozk-umino.github.io/parae/og.svg">
 <meta name="twitter:card" content="summary_large_image">
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-XX7LRGBW43"></script>
+<script async src="https://www.googletagmanager.com/gtm.js?id=GTM-KJH9FLC5"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
-  function gtag(){ window.dataLayer.push(arguments); }
-  function gaCleanUrl(url){ try { const u = new URL(url); return u.origin + u.pathname; } catch { return ''; } }
-  const gaPageLocation = gaCleanUrl(location.href);
+  function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-  gtag('config', 'G-XX7LRGBW43', {send_page_view:false, page_location:gaPageLocation, page_referrer:gaCleanUrl(document.referrer)});
-  gtag('event', 'page_view', {page_location:gaPageLocation, page_title:document.title});
   function trackParaeEvent(name, params){ if (typeof gtag === 'function') gtag('event', name, params || {}); }
 </script>
 <style>
