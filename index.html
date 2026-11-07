@@ -316,9 +316,10 @@
     const db=document.getElementById('delBtn'); if(db) db.textContent=`コマ削除（${cur+1}番）`;
     const ex=document.getElementById('multiDelExec'); if(ex) ex.textContent=`選択を削除（${multiSel.size}）`;
     const active=tl.querySelector('.thumb.active');
-    if(active){ // ページ全体はスクロールさせず、タイムラインの中だけ横に寄せる（scrollIntoViewだと画面ごと下へ動くため）
-      const tr=tl.getBoundingClientRect(), ar=active.getBoundingClientRect();
-      tl.scrollLeft += (ar.left - tr.left) - (tl.clientWidth/2 - ar.width/2);
+    if(active){ // 選択中コマが「見切れているときだけ」最小限スクロールする。毎回中央へ寄せると削除や描画のたびに視点が飛んで付近のコマを見失うため
+      const tr=tl.getBoundingClientRect(), ar=active.getBoundingClientRect(), pad=8;
+      if(ar.left < tr.left+pad) tl.scrollLeft -= (tr.left+pad - ar.left);
+      else if(ar.right > tr.right-pad) tl.scrollLeft += (ar.right - (tr.right-pad));
     }
   }
   function persist(){ try{ saveCur(); localStorage.setItem('parae-v1', JSON.stringify({frames,fps})); noteSave(true); }catch(e){ noteSave(false); } }
