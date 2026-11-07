@@ -413,11 +413,12 @@
   document.getElementById('dupBtn2').onclick=goDup;
   function deleteFrameAt(i){
     if(frames.length<=1){ alert('最後の1コマは消せません'); return; }
-    if(!confirm(`コマ ${i+1}（全${frames.length}コマ中）を削除しますか？`)) return;
     pushHistory();
     frames.splice(i,1);
     if(i<cur) cur--;
-    persist(); loadFrame(Math.min(cur,frames.length-1));
+    // ここで persist()（＝saveCurつき）を使うと、まだ画面に残っている「消したコマの絵」が
+    // 次のコマの場所へ上書き保存され、一個先が消えたように見える。保存は persistRaw() で行う
+    persistRaw(); loadFrame(Math.min(cur,frames.length-1));
   }
   document.getElementById('delBtn').onclick=()=>deleteFrameAt(cur);
   document.getElementById('multiDelBtn').onclick=()=>{
@@ -429,7 +430,6 @@
   document.getElementById('multiDelExec').onclick=()=>{
     if(!multiSel.size){ alert('削除するコマをタップして選んでください'); return; }
     if(multiSel.size>=frames.length){ alert('全部のコマは消せません（最低1コマ残します）'); return; }
-    if(!confirm(`選択した ${multiSel.size} コマをまとめて削除しますか？`)) return;
     pushHistory();
     const oldCur=cur;
     const keep=frames.map((_,i)=>i).filter(i=>!multiSel.has(i));
@@ -441,7 +441,7 @@
     multiSel.clear(); multiDelMode=false;
     document.getElementById('multiDelBtn').textContent='複数削除'; document.getElementById('multiDelBtn').classList.remove('active');
     document.getElementById('multiDelExec').style.display='none';
-    persist(); loadFrame(cur);
+    persistRaw(); loadFrame(cur); // deleteFrameAt と同じ理由で saveCur つき保存は使わない
   };
   const goPrev=()=>{ saveCur(); loadFrame(cur-1); };
   const goNext=()=>{ saveCur(); loadFrame(cur+1); };
