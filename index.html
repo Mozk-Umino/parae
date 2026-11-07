@@ -738,7 +738,7 @@
   async function shareFile(file, fallbackBlob, fallbackName, wasFresh){
     // スマホの共有シート（ファイル付き）に対応していればそれを使い、なければダウンロードへ
     if(navigator.share && navigator.canShare){
-      const data={files:[file], title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました'};
+      const data={files:[file], title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました https://mozk-umino.github.io/parae/ #ぱらえ'};
       if(navigator.canShare(data)){
         try{ await navigator.share(data); return; }
         catch(e){
