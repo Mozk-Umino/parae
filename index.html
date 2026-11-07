@@ -600,47 +600,65 @@
     const chunks=[]; rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
     const stopped=new Promise(r=>{ rec.onstop=r; });
     rec.start();
-    for(let loop=0; loop<3; loop++){ for(const src of frames){ const img=new Image(); await new Promise(r=>{ img.onload=r; img.onerror=r; img.src=src; }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
+    for(let loop=0; loop<2; loop++){ for(const src of frames){ const img=imgFor(src); await new Promise(r=>{ if(img.complete && img.naturalWidth) r(); else { img.onload=r; img.onerror=r; } }); x.fillStyle='#fff'; x.fillRect(0,0,W,H); x.drawImage(img,0,0); await new Promise(r=>setTimeout(r,1000/fps)); } }
     rec.stop(); await stopped;
     return new Blob(chunks,{type:'video/webm'});
   }
+  // 動画は作るのに時間がかかる（実時間で録画するため）ので、作品が変わっていない間は作り直さない。
+  // キャッシュの照合はコマ画像の中身から作るキーで行う（保存経路に依存しないため）
+  let videoCache={key:null, blob:null};
+  function videoKey(){
+    return fps+'|'+frames.map(f=>{ let h=0; for(let i=0;i<f.length;i+=97) h=(h*31 + f.charCodeAt(i))|0; return f.length+':'+h; }).join('|');
+  }
+  async function getVideoBlob(){
+    saveCur();
+    const key=videoKey();
+    if(videoCache.key===key && videoCache.blob) return {blob:videoCache.blob, fresh:false};
+    const blob=await makeWebmBlob();
+    if(blob) videoCache={key, blob};
+    return {blob, fresh:true};
+  }
   function downloadBlob(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
   document.getElementById('webmBtn').onclick=async()=>{
-    saveCur(); const blob=await makeWebmBlob();
+    saveCur(); const {blob}=await getVideoBlob();
     if(!blob){ alert('このブラウザでは動画保存に未対応です。再生しながら画面録画するか、画像保存を使ってください'); return; }
     downloadBlob(blob,'parae.webm');
   };
-  async function shareFile(file, fallbackBlob, fallbackName){
+  async function shareFile(file, fallbackBlob, fallbackName, wasFresh){
     // スマホの共有シート（ファイル付き）に対応していればそれを使い、なければダウンロードへ
     if(navigator.share && navigator.canShare){
       const data={files:[file], title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました'};
       if(navigator.canShare(data)){
-        try{ await navigator.share(data); }catch(e){ /* キャンセル時は静かに閉じる */ }
-        return;
+        try{ await navigator.share(data); return; }
+        catch(e){
+          if(e && e.name==='AbortError') return; // 本人がキャンセルしたときは静かに閉じる
+          // 生成に時間がかかると「タップ直後」の権限が切れて共有が開けないことがある。
+          // 動画はキャッシュ済みなので、もう一度押せばすぐ開ける
+          if(wasFresh){ alert('動画の準備ができました。もう一度ボタンを押すと、今度はすぐ共有画面が開きます'); return; }
+          // それ以外で開けない場合はダウンロードに切り替える
+        }
       }
     }
-    if(navigator.share){
-      try{ await navigator.share({title:'ぱらえ', text:'ぱらえでパラパラマンガを作りました'}); downloadBlob(fallbackBlob,fallbackName); return; }catch(e){ if(e && e.name==='AbortError') return; }
-    }
     downloadBlob(fallbackBlob,fallbackName);
-    alert('この端末ではファイル共有に未対応のため、動画をダウンロードしました。投稿先のアプリからそのファイルを選んでください');
+    alert('共有画面を開けなかったため、ファイルをダウンロードしました。投稿先のアプリからそのファイルを選んでください');
   }
   document.getElementById('shareBtn').onclick=async()=>{
     const btn=document.getElementById('shareBtn'); if(btn.disabled) return;
     saveCur(); persist();
     btn.disabled=true; const old=btn.textContent; btn.textContent='動画を作成中…';
     try{
-      const blob=await makeWebmBlob();
+      const {blob, fresh}=await getVideoBlob();
       if(!blob){ alert('このブラウザでは動画作成に未対応です。「今のコマを画像で共有」は使えます'); return; }
+      if(!fresh) btn.textContent='共有を開いています…';
       const file=new File([blob],'parae.webm',{type:'video/webm'});
-      await shareFile(file, blob, 'parae.webm');
+      await shareFile(file, blob, 'parae.webm', fresh);
     } finally { btn.disabled=false; btn.textContent=old; }
   };
   document.getElementById('sharePngBtn').onclick=async()=>{
     saveCur();
     const blob=await (await fetch(frames[cur])).blob();
     const file=new File([blob],'parae-frame.png',{type:'image/png'});
-    await shareFile(file, blob, 'parae-frame.png');
+    await shareFile(file, blob, 'parae-frame.png', false);
   };
 
   if(!restore()) frames=[blankURL()];
